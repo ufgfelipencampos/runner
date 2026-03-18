@@ -1,0 +1,39 @@
+@startuml
+skinparam componentStyle rectangle
+skinparam wrapWidth 220
+skinparam maxMessageSize 120
+
+actor "Usuário" as User
+
+component "CLI Runner" as CLI {
+  [CLI Core\n(Parser + Router)] as Core
+  [Validation & Error Layer] as Val
+  [Assinador Client] as SignClient
+  [Simulador Manager] as SimMgr
+  [Runtime Manager\n(JDK Discovery/Provision)] as Runtime
+  [Artifact Manager\n(Download/Version Cache)] as Artifact
+  [Logging & Exit Codes] as Obs
+}
+
+component "assinador.jar" as SignJar
+component "simulador.jar" as SimJar
+cloud "GitHub Releases" as GH
+node "Host OS\n(Windows/Linux/macOS)" as OS
+
+User --> Core : comandos CLI
+Core --> Val : validar parâmetros
+Core --> SignClient : criar/validar assinatura
+Core --> SimMgr : start/stop/status simulador
+
+SignClient --> Runtime : obter Java runtime
+SignClient --> SignJar : execução local / HTTP
+SimMgr --> Artifact : verificar versão
+Artifact --> GH : baixar jars
+SimMgr --> Runtime : obter Java runtime
+SimMgr --> SimJar : iniciar/parar/consultar
+
+Val --> Obs : erros estruturados
+Core --> Obs : logs operacionais
+Runtime --> OS : detectar ambiente
+
+@enduml

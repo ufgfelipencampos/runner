@@ -1,0 +1,83 @@
+@startuml
+skinparam classAttributeIconSize 0
+
+class CliApp {
+  +run(args: String[]): int
+}
+
+class CommandRouter {
+  +dispatch(command: String, options: Map): Result
+}
+
+class SignCommand {
+  +executeCreate(req: SignRequest): Result
+  +executeValidate(req: ValidateRequest): Result
+}
+
+class SimulatorCommand {
+  +start(): Result
+  +stop(): Result
+  +status(): Result
+}
+
+class AssinadorService {
+  +createSignature(req: SignRequest, mode: Mode): SignResponse
+  +validateSignature(req: ValidateRequest, mode: Mode): ValidateResponse
+}
+
+interface AssinadorGateway {
+  +invokeCreate(req: SignRequest): RawResponse
+  +invokeValidate(req: ValidateRequest): RawResponse
+}
+
+class LocalAssinadorGateway
+class HttpAssinadorGateway
+
+class RuntimeService {
+  +resolveJava(): JavaRuntime
+  +provisionIfNeeded(): JavaRuntime
+}
+
+class ArtifactService {
+  +resolveLatest(name: String): ArtifactVersion
+  +downloadIfNeeded(name: String, version: String): File
+}
+
+class SimulatorService {
+  +start(jar: File): ProcessInfo
+  +stop(pid: long): Result
+  +status(): SimulatorStatus
+}
+
+class InputValidator {
+  +validateSign(req: SignRequest): ValidationResult
+  +validateValidate(req: ValidateRequest): ValidationResult
+}
+
+class ErrorMapper {
+  +toCliError(ex: Exception): CliError
+}
+
+CliApp --> CommandRouter
+CommandRouter --> SignCommand
+CommandRouter --> SimulatorCommand
+
+SignCommand --> InputValidator
+SignCommand --> AssinadorService
+SignCommand --> ErrorMapper
+
+SimulatorCommand --> SimulatorService
+SimulatorCommand --> ArtifactService
+SimulatorCommand --> RuntimeService
+SimulatorCommand --> ErrorMapper
+
+AssinadorService --> AssinadorGateway
+AssinadorGateway <|.. LocalAssinadorGateway
+AssinadorGateway <|.. HttpAssinadorGateway
+
+LocalAssinadorGateway --> RuntimeService
+HttpAssinadorGateway --> RuntimeService
+SimulatorService --> RuntimeService
+ArtifactService --> RuntimeService
+
+@enduml

@@ -1,0 +1,28 @@
+@startuml
+actor "Usuário" as User
+participant "CLI Core" as CLI
+participant "InputValidator" as Validator
+participant "AssinadorService" as Service
+participant "AssinadorGateway\n(Local/HTTP)" as Gateway
+participant "assinador.jar" as Jar
+participant "ErrorMapper" as Err
+
+User -> CLI : comando assinatura/validação
+CLI -> Validator : validar entrada
+
+alt parâmetros inválidos
+  Validator --> CLI : ValidationError
+  CLI -> Err : mapear erro
+  Err --> CLI : CliError (mensagem clara)
+  CLI --> User : erro + código de saída
+else parâmetros válidos
+  Validator --> CLI : OK
+  CLI -> Service : processar requisição
+  Service -> Gateway : invocar operação
+  Gateway -> Jar : executar (CLI ou HTTP)
+  Jar --> Gateway : resposta simulada
+  Gateway --> Service : resposta normalizada
+  Service --> CLI : resultado
+  CLI --> User : saída formatada
+end
+@enduml
