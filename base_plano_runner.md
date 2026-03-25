@@ -33,13 +33,15 @@ Definir as tecnologias que serão utilizadas no projeto:
 - Instalar e configurar Cobra
 
 ### 1.2 Estruturação dos Comandos
+```text
 assinatura
 ├── sign
 ├── validate
 └── simulador
-├── start
-├── stop
-└── status
+    ├── start
+    ├── stop
+    └── status
+```
 
 ### 1.3 Parsing de Argumentos
 - Implementar flags
