@@ -1,9 +1,5 @@
-# Sistema Runner - Design
 # Sistema Runner - Design Arquitetural (Mermaid)
 
-- O registro do design é organizado conforme o modelo C4. Consulte [C4 Model](https://c4model.com/) para detalhes.
-- Diagramas empregam o PlantUml. Consulte [PlantUml](https://plantuml-documentation.readthedocs.io/en/latest/) para detalhes.
-- Scripts (geraimagens.sh e geraimagens.bat) automatizam a geração de diagramas a partir dos arquivos .puml.
 Este documento consolida os diagramas arquiteturais em **Markdown + Mermaid**, com foco nas histórias de usuário atuais:
 - o usuário interage com o **Sistema Runner** (que expõe os dois CLIs);
 - os dois JARs são tratados como **sistemas externos**;
@@ -11,34 +7,25 @@ Este documento consolida os diagramas arquiteturais em **Markdown + Mermaid**, c
 
 ---
 
-## 1. Diagrama de Contexto
 ## 1) Diagrama de Contexto
 
-![](diagramas/imagens/contexto.svg)
 ```mermaid
 flowchart LR
     U[Ator: Usuário Comum]
-    R[Sistema Runner\n(CLI Assinador + CLI Simulador)]
-    AJ[Sistema Externo:\nassinador-verificador.jar]
-    SJ[Sistema Externo:\nsimulador.jar]
+    R["Sistema Runner<br/>(CLI Assinador + CLI Simulador)"]
+    AJ["Sistema Externo:<br/>assinador-verificador.jar"]
+    SJ["Sistema Externo:<br/>simulador.jar"]
 
-**Atores e Sistemas Externos:**
-    U -->|Comandos CLI| R
-    R -->|Assinar / Verificar\none-time ou server| AJ
-    R -->|Start / Status / Stop\nsimulador| SJ
+        U -->|Comandos CLI| R
+    R -->|Assinar / Verificar<br/>one-time ou server| AJ
+    R -->|Start / Status / Stop<br/>simulador| SJ
     AJ -->|Resultado da operação| R
     SJ -->|Status e confirmação| R
     R -->|Feedback e códigos de saída| U
 ```
 
-| Elemento | Tipo | Descrição |
-|----------|------|-----------|
-| Usuário | Ator | Pessoa que interage com o sistema via linha de comandos |
-| Dispositivo de Assinatura Digital | Sistema Externo | Hardware criptográfico (token USB, smart card) que armazena certificados e executa operações de assinatura |
-| Simulador do HubSaúde | Sistema Externo | Aplicação Web gerida pelo CLI e que responde a requisições de terceiros |
 ### Tabela descritiva (Contexto)
 
-## 2. Diagrama de Contêineres
 | Elemento | Tipo | Responsabilidade |
 |---|---|---|
 | Usuário Comum | Ator | Executa comandos nos CLIs sem precisar conhecer Java. |
@@ -46,19 +33,10 @@ flowchart LR
 | assinador-verificador.jar | Sistema externo | Processa assinatura/verificação em modo one-time ou server. |
 | simulador.jar | Sistema externo | Fornece serviço de simulação controlado por start/status/stop. |
 
-![](diagramas/imagens/conteineres.svg)
 ---
 
-**Comunicação entre contêineres:**
 ## 2) Diagrama de Contêineres (visão interna do Runner)
 
-| Origem | Destino | Protocolo | Descrição |
-|--------|---------|-----------|-----------|
-| Usuário | assinador  | CLI | Comandos de assinatura (criar, validar) digitados no terminal |
-| Usuário | simulador | CLI | Comandos de gerenciamento do simulador |
-| assinador | assinador.jar | chamada de método ou HTTP | Invocação direta ou requisição HTTP (conforme modo de execução) |
-| assinador.jar | Dispositivo Criptográfico | PKCS#11 | Interface padrão para comunicação com tokens e smart cards |
-| simulador | Simulador do HubSaúde | HTTP | Invoca e monitora o ciclo de vida do simulador |
 ```mermaid
 flowchart LR
     U[Usuário Comum]
@@ -66,17 +44,17 @@ flowchart LR
     subgraph R[Sistema Runner]
       AC[Container: CLI Assinador]
       SC[Container: CLI Simulador]
-      DEP[Container: Gerenciador de Dependências\n(Java + download de JAR)]
+      DEP["Container: Gerenciador de Dependências<br/>(Java + download de JAR)"]
     end
 
-    AJ[Sistema Externo:\nassinador-verificador.jar]
-    SJ[Sistema Externo:\nsimulador.jar]
+    AJ["Sistema Externo:<br/>assinador-verificador.jar"]
+    SJ["Sistema Externo:<br/>simulador.jar"]
 
     U -->|Comandos assinar/verificar/server| AC
     U -->|Comandos start/status/stop| SC
 
-    AC -->|verifica/provisiona Java\nverifica/baixa jar| DEP
-    SC -->|verifica/provisiona Java\nverifica/baixa jar| DEP
+    AC -->|verifica/provisiona Java<br/>verifica/baixa jar| DEP
+    SC -->|verifica/provisiona Java<br/>verifica/baixa jar| DEP
 
     AC -->|invoca operações| AJ
     SC -->|controla ciclo de vida| SJ
