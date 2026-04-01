@@ -252,3 +252,7 @@ interface SignatureService {
 
 ### 13.4 Verificação
 - Garantir integridade dos binários
+
+## 14. Visão Geral e Direcionamento
+
+Este planejamento define uma abordagem incremental e modular para o desenvolvimento do Sistema Runner, começando por um CLI funcional em Go e evoluindo para uma arquitetura híbrida com execução local e modo servidor em Java. A separação clara entre camadas (CLI, execução de processos, API e persistência) favorece manutenibilidade, testabilidade e futura escalabilidade. Além disso, a inclusão antecipada de preocupações como gerenciamento de processos, provisionamento de JDK, versionamento e segurança garante que o sistema não seja apenas funcional, mas também robusto e pronto para distribuição em múltiplos ambientes.
