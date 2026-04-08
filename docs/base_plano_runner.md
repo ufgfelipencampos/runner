@@ -1,6 +1,6 @@
 # Planejamento de Desenvolvimento — Sistema Runner
 
-## 0. Fase de Entendimento e Definições Iniciais
+## 0. Fase de Entendimento e Definições Iniciais:
 
 ### 0.1 Definição da Stack Tecnológica
 Definir as tecnologias que serão utilizadas no projeto:
