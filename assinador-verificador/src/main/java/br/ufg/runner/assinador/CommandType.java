@@ -2,7 +2,8 @@ package br.ufg.runner.assinador;
 
 enum CommandType {
     SIGN("sign"),
-    VALIDATE("validate");
+    VALIDATE("validate"),
+    SERVER("server");
 
     private final String cliName;
 

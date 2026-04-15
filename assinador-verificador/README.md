@@ -6,11 +6,12 @@ Modulo Java inicial para o `assinador-verificador.jar`.
 
 - comando `sign` em modo `one-time`
 - comando `validate` em modo `one-time`
+- comando `server` com `start`, `status` e `stop`
 - validacao forte de flags e arquivos
 - resposta JSON padronizada
 - simulacao deterministica de assinatura via digest SHA-256
 
-O modo `server` ainda nao foi implementado neste recorte.
+O modo `server` agora e suportado de forma simulada para controlar o ciclo de vida do servico.
 
 ## Contrato atual
 
@@ -35,6 +36,22 @@ java -jar .\build\dist\assinador-verificador.jar `
   --pathin .\build\saida\assinado.json `
   --pathout .\build\saida\resultado-validacao.json `
   --mode one-time
+```
+
+### Server
+
+```powershell
+java -jar .\build\dist\assinador-verificador.jar `
+  server start `
+  --port 8080
+
+java -jar .\build\dist\assinador-verificador.jar `
+  server status `
+  --port 8080
+
+java -jar .\build\dist\assinador-verificador.jar `
+  server stop `
+  --port 8080
 ```
 
 ## Premissas desta primeira versao

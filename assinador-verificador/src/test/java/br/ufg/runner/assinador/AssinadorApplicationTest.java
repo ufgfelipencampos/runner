@@ -5,12 +5,13 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.ServerSocket;
 
 public final class AssinadorApplicationTest {
     public static void main(String[] args) throws Exception {
         AssinadorApplicationTest testSuite = new AssinadorApplicationTest();
         testSuite.shouldSignAndValidateInOneTimeMode();
-        testSuite.shouldRejectUnsupportedMode();
+        testSuite.shouldStartStatusAndStopServer();
         testSuite.shouldRejectPayloadWithoutResourceType();
         System.out.println("All assinador-verificador tests passed.");
     }
@@ -60,23 +61,54 @@ public final class AssinadorApplicationTest {
         assertContains(validateResult.stdout(), "\"valid\": true", "validate stdout should report a valid signature");
     }
 
-    private void shouldRejectUnsupportedMode() throws Exception {
-        Path tempDir = Files.createTempDirectory("assinador-test-mode");
-        Path inputPath = tempDir.resolve("entrada.json");
-        Path outputPath = tempDir.resolve("saida.json");
+    private void shouldStartStatusAndStopServer() throws Exception {
+        int port = findFreePort();
 
-        Files.writeString(inputPath, "{\"resourceType\":\"Bundle\"}", StandardCharsets.UTF_8);
-
-        InvocationResult result = run(
-            "sign",
-            "--pathin", inputPath.toString(),
-            "--pathout", outputPath.toString(),
-            "--mode", "server",
-            "--alias", "test-signer"
+        InvocationResult startResult = run(
+            "server",
+            "start",
+            "--port", Integer.toString(port)
         );
 
-        assertEquals(2, result.exitCode(), "server mode should be rejected for now");
-        assertContains(result.stderr(), "Modo nao suportado", "stderr should explain that server mode is not implemented");
+        try {
+            assertEquals(ExitCode.SERVER_RUNNING.value(), startResult.exitCode(), "server start should keep the process alive");
+            assertContains(startResult.stdout(), "\"operation\": \"server-start\"", "server start should report startup data");
+
+            InvocationResult statusResult = run(
+                "server",
+                "status",
+                "--port", Integer.toString(port)
+            );
+
+            assertEquals(0, statusResult.exitCode(), "server status should succeed while running");
+            assertContains(statusResult.stdout(), "\"running\": true", "server status should report the service as running");
+
+            InvocationResult stopResult = run(
+                "server",
+                "stop",
+                "--port", Integer.toString(port)
+            );
+
+            assertEquals(0, stopResult.exitCode(), "server stop should succeed");
+            assertContains(stopResult.stdout(), "\"server-stop\"", "server stop should confirm shutdown");
+
+            waitForServerToStop(port);
+
+            InvocationResult stoppedStatus = run(
+                "server",
+                "status",
+                "--port", Integer.toString(port)
+            );
+
+            assertEquals(0, stoppedStatus.exitCode(), "server status should still succeed after stop");
+            assertContains(stoppedStatus.stdout(), "\"running\": false", "server status should report the service as stopped");
+        } finally {
+            try {
+                run("server", "stop", "--port", Integer.toString(port));
+            } catch (Exception ignored) {
+                // Best effort cleanup in case the test fails before the explicit stop.
+            }
+        }
     }
 
     private void shouldRejectPayloadWithoutResourceType() throws Exception {
@@ -114,6 +146,31 @@ public final class AssinadorApplicationTest {
             stdoutBuffer.toString(StandardCharsets.UTF_8),
             stderrBuffer.toString(StandardCharsets.UTF_8)
         );
+    }
+
+    private static int findFreePort() throws Exception {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            socket.setReuseAddress(true);
+            return socket.getLocalPort();
+        }
+    }
+
+    private static void waitForServerToStop(int port) throws Exception {
+        for (int attempt = 0; attempt < 20; attempt++) {
+            InvocationResult statusResult = new AssinadorApplicationTest().run(
+                "server",
+                "status",
+                "--port", Integer.toString(port)
+            );
+
+            if (statusResult.stdout().contains("\"running\": false")) {
+                return;
+            }
+
+            Thread.sleep(50L);
+        }
+
+        throw new AssertionError("server did not stop in time");
     }
 
     private static void assertEquals(int expected, int actual, String message) {

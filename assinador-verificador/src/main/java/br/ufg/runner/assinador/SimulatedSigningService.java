@@ -17,6 +17,15 @@ final class SimulatedSigningService {
         return switch (arguments.commandType()) {
             case SIGN -> sign(arguments);
             case VALIDATE -> validate(arguments);
+            case SERVER -> executeServer(arguments);
+        };
+    }
+
+    private String executeServer(CliArguments arguments) throws Exception {
+        return switch (arguments.serverCommandType()) {
+            case START -> SimulatedServerService.start(arguments.serverPort());
+            case STATUS -> SimulatedServerService.status(arguments.serverPort());
+            case STOP -> SimulatedServerService.stop(arguments.serverPort());
         };
     }
 

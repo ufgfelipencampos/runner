@@ -21,7 +21,10 @@ public final class AssinadorApplication {
 
     public static void main(String[] args) {
         int exitCode = new AssinadorApplication().run(args);
-        System.exit(exitCode);
+
+        if (exitCode != ExitCode.SERVER_RUNNING.value()) {
+            System.exit(exitCode);
+        }
     }
 
     int run(String[] args) {
@@ -29,8 +32,14 @@ public final class AssinadorApplication {
             CliArguments arguments = CliArguments.parse(args);
             String result = service.execute(arguments);
 
-            Files.writeString(arguments.outputPath(), result, StandardCharsets.UTF_8);
+            if (arguments.outputPath() != null) {
+                Files.writeString(arguments.outputPath(), result, StandardCharsets.UTF_8);
+            }
             stdout.println(result);
+            if (arguments.commandType() == CommandType.SERVER && arguments.serverCommandType() == ServerCommandType.START) {
+                return ExitCode.SERVER_RUNNING.value();
+            }
+
             return ExitCode.SUCCESS.value();
         } catch (ValidationException error) {
             stderr.println(errorAsJson("VALIDATION_ERROR", error.getMessage()));

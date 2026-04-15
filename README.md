@@ -6,7 +6,7 @@ Projeto em construcao para orquestrar CLIs multiplataforma e JARs Java do Sistem
 
 - Os CLIs serao implementados em Go.
 - Neste incremento, somente o `assinador-verificador.jar` foi iniciado.
-- O foco atual do JAR e o modo `one-time` para `sign` e `validate`.
+- O foco atual do JAR cobre `sign`, `validate` e o ciclo de vida do `server` simulado.
 
 ## Estrutura
 
