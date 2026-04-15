@@ -65,6 +65,7 @@ final class SimulatedSigningService {
 
     private String validate(CliArguments arguments) throws Exception {
         String signedPayload = Files.readString(arguments.inputPath(), StandardCharsets.UTF_8);
+        validateValidatePayload(signedPayload);
         String signature = requireField("signature", SIGNATURE_PATTERN, signedPayload);
         String digest = requireField("inputDigestSha256", DIGEST_PATTERN, signedPayload);
         String signer = optionalField(SIGNER_PATTERN, signedPayload, "unknown");
@@ -97,6 +98,17 @@ final class SimulatedSigningService {
             JsonEscaper.escape(signer),
             JsonEscaper.escape(checkedAt)
         );
+    }
+
+    private void validateValidatePayload(String payload) throws ValidationException {
+        String normalized = payload.trim();
+        if (normalized.isEmpty()) {
+            throw new ValidationException("O conteudo do arquivo de entrada esta vazio.");
+        }
+
+        if (!(normalized.startsWith("{") && normalized.endsWith("}"))) {
+            throw new ValidationException("O arquivo de entrada deve conter um objeto JSON.");
+        }
     }
 
     private void validateSignPayload(String payload) throws ValidationException {

@@ -9,8 +9,7 @@ import java.util.regex.Pattern;
 
 final class CliArguments {
     private static final Pattern ALIAS_PATTERN = Pattern.compile("[A-Za-z0-9_-]{3,64}");
-    private static final Pattern SLOT_PATTERN = Pattern.compile("\\d+");
-    private static final Pattern PORT_PATTERN = Pattern.compile("\\d+");
+    private static final Pattern DIGITS_PATTERN = Pattern.compile("\\d+");
     private static final int DEFAULT_SERVER_PORT = 8080;
 
     private final CommandType commandType;
@@ -189,6 +188,10 @@ final class CliArguments {
             throw new ValidationException("O arquivo de entrada deve ter extensao .json.");
         }
 
+        if (!outputPath.getFileName().toString().toLowerCase().endsWith(".json")) {
+            throw new ValidationException("O arquivo de saida deve ter extensao .json.");
+        }
+
         if (inputPath.equals(outputPath)) {
             throw new ValidationException("Os caminhos de entrada e saida nao podem ser o mesmo arquivo.");
         }
@@ -215,6 +218,12 @@ final class CliArguments {
             }
         }
 
+        if (commandType == CommandType.VALIDATE) {
+            if (alias != null || pkcs11Library != null || pkcs11Slot != null) {
+                throw new ValidationException("O comando validate nao aceita --alias, --pkcs11-lib nem --pkcs11-slot.\n" + usage());
+            }
+        }
+
         if (pkcs11Library != null) {
             String normalized = pkcs11Library.toLowerCase();
             if (!(normalized.endsWith(".dll") || normalized.endsWith(".so") || normalized.endsWith(".dylib"))) {
@@ -222,7 +231,7 @@ final class CliArguments {
             }
         }
 
-        if (pkcs11Slot != null && !SLOT_PATTERN.matcher(pkcs11Slot).matches()) {
+        if (pkcs11Slot != null && !DIGITS_PATTERN.matcher(pkcs11Slot).matches()) {
             throw new ValidationException("O slot PKCS#11 deve ser um numero inteiro nao negativo.");
         }
     }
@@ -233,7 +242,7 @@ final class CliArguments {
             return null;
         }
 
-        if (!PORT_PATTERN.matcher(normalized).matches()) {
+        if (!DIGITS_PATTERN.matcher(normalized).matches()) {
             throw new ValidationException("A porta informada em --port deve ser numerica.");
         }
 

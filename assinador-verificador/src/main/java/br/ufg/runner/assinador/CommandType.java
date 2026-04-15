@@ -22,7 +22,7 @@ enum CommandType {
             }
         }
 
-        throw new ValidationException("Comando invalido: " + rawValue + ". Use sign ou validate.");
+        throw new ValidationException("Comando invalido: " + rawValue + ". Use sign, validate ou server.");
     }
 }
 
