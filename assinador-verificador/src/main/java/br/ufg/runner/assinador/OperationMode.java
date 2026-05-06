@@ -1,7 +1,8 @@
 package br.ufg.runner.assinador;
 
 enum OperationMode {
-    ONE_TIME("one-time");
+    DIRECT("direct"),
+    HTTP("http");
 
     private final String cliName;
 
@@ -20,7 +21,8 @@ enum OperationMode {
             }
         }
 
-        throw new ValidationException("Modo nao suportado: " + rawValue + ". Nesta versao use apenas one-time.");
+        throw new ValidationException(
+            "Modo nao suportado: " + rawValue + ". Use direct (execucao direta) ou http (servidor HTTP em execucao)."
+        );
     }
 }
-

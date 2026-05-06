@@ -51,13 +51,14 @@ public final class AssinadorApplication {
     }
 
     private String errorAsJson(String type, String message) {
+        String safeMessage = message != null ? message : "Erro desconhecido.";
         return """
             {
               "status": "ERROR",
               "type": "%s",
               "message": "%s"
             }
-            """.formatted(JsonEscaper.escape(type), JsonEscaper.escape(message));
+            """.formatted(JsonEscaper.escape(type), JsonEscaper.escape(safeMessage));
     }
 }
 

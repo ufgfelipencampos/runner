@@ -22,6 +22,6 @@ enum ServerCommandType {
             }
         }
 
-        throw new ValidationException("Acao invalida para o comando server: " + rawValue + ". Use start, status ou stop.");
+        throw new ValidationException("Acao de server invalida: " + rawValue + ". Use start, status ou stop.\n" + CliArguments.usage());
     }
 }

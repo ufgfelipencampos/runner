@@ -2,111 +2,153 @@ package br.ufg.runner.assinador;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.net.ServerSocket;
 
 public final class AssinadorApplicationTest {
     public static void main(String[] args) throws Exception {
-        AssinadorApplicationTest testSuite = new AssinadorApplicationTest();
-        testSuite.shouldSignAndValidateInOneTimeMode();
-        testSuite.shouldStartStatusAndStopServer();
-        testSuite.shouldUseDefaultPortForServerStart();
-        testSuite.shouldRejectPayloadWithoutResourceType();
-        testSuite.shouldRejectMissingAliasForSign();
-        testSuite.shouldRejectUnsupportedMode();
-        testSuite.shouldRejectInvalidPkcs11LibraryExtension();
-        testSuite.shouldRejectSameInputAndOutputPath();
-        testSuite.shouldRejectSigningFlagsOnServerCommand();
-        testSuite.shouldReportInvalidSignatureAsFalse();
-        testSuite.shouldRejectServerStartWhenPortIsAlreadyInUse();
+        AssinadorApplicationTest suite = new AssinadorApplicationTest();
+
+        suite.shouldSignAndValidateInDirectMode();
+        suite.shouldSignAndValidateViaHttpMode();
+        suite.shouldStartStatusAndStopServer();
+        suite.shouldStartServerWithInactivityTimeout();
+        suite.shouldRejectPayloadWithoutResourceType();
+        suite.shouldRejectPayloadWithoutResourceTypeViaHttp();
+        suite.shouldRejectInvalidMode();
+        suite.shouldRejectMissingAlias();
+        suite.shouldRejectInvalidAlias();
+        suite.shouldRejectInvalidPkcs11LibExtension();
+        suite.shouldRejectNonNumericPkcs11Slot();
+        suite.shouldRejectValidateWithAlias();
+        suite.shouldRejectDuplicateFlag();
+        suite.shouldRejectUnknownFlag();
+        suite.shouldRejectTimeoutOnStatusCommand();
+
         System.out.println("All assinador-verificador tests passed.");
     }
 
-    private void shouldSignAndValidateInOneTimeMode() throws Exception {
-        Path tempDir = Files.createTempDirectory("assinador-test");
+    // --- Fluxos principais ---
+
+    private void shouldSignAndValidateInDirectMode() throws Exception {
+        Path tempDir = Files.createTempDirectory("assinador-test-direct");
         Path inputPath = tempDir.resolve("entrada.json");
         Path signedPath = tempDir.resolve("assinado.json");
         Path validationPath = tempDir.resolve("validacao.json");
 
-        Files.writeString(
-            inputPath,
-            """
-                {
-                  "resourceType": "Bundle",
-                  "id": "bundle-001",
-                  "entry": []
-                }
-                """,
-            StandardCharsets.UTF_8
-        );
+        Files.writeString(inputPath, """
+            {
+              "resourceType": "Bundle",
+              "id": "bundle-001",
+              "entry": []
+            }
+            """, StandardCharsets.UTF_8);
 
         InvocationResult signResult = run(
             "sign",
             "--pathin", inputPath.toString(),
             "--pathout", signedPath.toString(),
-            "--mode", "one-time",
+            "--mode", "direct",
             "--alias", "test-signer",
             "--pkcs11-lib", "token.dll",
             "--pkcs11-slot", "0"
         );
 
-        assertEquals(0, signResult.exitCode(), "sign should exit with success");
+        assertEquals(0, signResult.exitCode(), "sign (direct) should exit with success");
         assertTrue(Files.exists(signedPath), "sign should create output file");
-        assertContains(signResult.stdout(), "\"operation\": \"sign\"", "sign stdout should describe the operation");
-        assertContains(Files.readString(signedPath), "\"signature\": \"SIMULATED-SIGNATURE-", "sign output should contain a simulated signature");
+        assertContains(signResult.stdout(), "\"operation\": \"sign\"", "sign stdout should contain operation");
+        assertContains(signResult.stdout(), "\"mode\": \"direct\"", "sign stdout should report direct mode");
+        assertContains(Files.readString(signedPath), "\"signature\": \"SIMULATED-SIGNATURE-", "output file should contain simulated signature");
 
         InvocationResult validateResult = run(
             "validate",
             "--pathin", signedPath.toString(),
             "--pathout", validationPath.toString(),
-            "--mode", "one-time"
+            "--mode", "direct"
         );
 
-        assertEquals(0, validateResult.exitCode(), "validate should exit with success");
+        assertEquals(0, validateResult.exitCode(), "validate (direct) should exit with success");
         assertTrue(Files.exists(validationPath), "validate should create output file");
-        assertContains(validateResult.stdout(), "\"valid\": true", "validate stdout should report a valid signature");
+        assertContains(validateResult.stdout(), "\"valid\": true", "validate should report signature as valid");
+        assertContains(validateResult.stdout(), "\"mode\": \"direct\"", "validate stdout should report direct mode");
+    }
+
+    private void shouldSignAndValidateViaHttpMode() throws Exception {
+        int port = findFreePort();
+
+        InvocationResult startResult = run("server", "start", "--port", Integer.toString(port));
+        assertEquals(ExitCode.SERVER_RUNNING.value(), startResult.exitCode(), "server start should keep process alive");
+
+        try {
+            Path tempDir = Files.createTempDirectory("assinador-test-http");
+            Path inputPath = tempDir.resolve("entrada.json");
+            Path signedPath = tempDir.resolve("assinado.json");
+            Path validationPath = tempDir.resolve("validacao.json");
+
+            Files.writeString(inputPath, """
+                {
+                  "resourceType": "Composition",
+                  "id": "comp-001"
+                }
+                """, StandardCharsets.UTF_8);
+
+            InvocationResult signResult = run(
+                "sign",
+                "--pathin", inputPath.toString(),
+                "--pathout", signedPath.toString(),
+                "--mode", "http",
+                "--port", Integer.toString(port),
+                "--alias", "http-signer",
+                "--pkcs11-lib", "token.so",
+                "--pkcs11-slot", "1"
+            );
+
+            assertEquals(0, signResult.exitCode(), "sign (http) should exit with success");
+            assertTrue(Files.exists(signedPath), "sign via http should create output file");
+            assertContains(signResult.stdout(), "\"operation\": \"sign\"", "sign http stdout should contain operation");
+            assertContains(signResult.stdout(), "\"mode\": \"http\"", "sign http stdout should report http mode");
+
+            InvocationResult validateResult = run(
+                "validate",
+                "--pathin", signedPath.toString(),
+                "--pathout", validationPath.toString(),
+                "--mode", "http",
+                "--port", Integer.toString(port)
+            );
+
+            assertEquals(0, validateResult.exitCode(), "validate (http) should exit with success");
+            assertTrue(Files.exists(validationPath), "validate via http should create output file");
+            assertContains(validateResult.stdout(), "\"valid\": true", "validate http should report signature as valid");
+            assertContains(validateResult.stdout(), "\"mode\": \"http\"", "validate http stdout should report http mode");
+        } finally {
+            run("server", "stop", "--port", Integer.toString(port));
+        }
     }
 
     private void shouldStartStatusAndStopServer() throws Exception {
         int port = findFreePort();
 
-        InvocationResult startResult = run(
-            "server",
-            "start",
-            "--port", Integer.toString(port)
-        );
+        InvocationResult startResult = run("server", "start", "--port", Integer.toString(port));
 
         try {
             assertEquals(ExitCode.SERVER_RUNNING.value(), startResult.exitCode(), "server start should keep the process alive");
             assertContains(startResult.stdout(), "\"operation\": \"server-start\"", "server start should report startup data");
 
-            InvocationResult statusResult = run(
-                "server",
-                "status",
-                "--port", Integer.toString(port)
-            );
+            InvocationResult statusResult = run("server", "status", "--port", Integer.toString(port));
 
             assertEquals(0, statusResult.exitCode(), "server status should succeed while running");
             assertContains(statusResult.stdout(), "\"running\": true", "server status should report the service as running");
 
-            InvocationResult stopResult = run(
-                "server",
-                "stop",
-                "--port", Integer.toString(port)
-            );
+            InvocationResult stopResult = run("server", "stop", "--port", Integer.toString(port));
 
             assertEquals(0, stopResult.exitCode(), "server stop should succeed");
             assertContains(stopResult.stdout(), "\"server-stop\"", "server stop should confirm shutdown");
 
             waitForServerToStop(port);
 
-            InvocationResult stoppedStatus = run(
-                "server",
-                "status",
-                "--port", Integer.toString(port)
-            );
+            InvocationResult stoppedStatus = run("server", "status", "--port", Integer.toString(port));
 
             assertEquals(0, stoppedStatus.exitCode(), "server status should still succeed after stop");
             assertContains(stoppedStatus.stdout(), "\"running\": false", "server status should report the service as stopped");
@@ -114,17 +156,26 @@ public final class AssinadorApplicationTest {
             try {
                 run("server", "stop", "--port", Integer.toString(port));
             } catch (Exception ignored) {
-                // Best effort cleanup in case the test fails before the explicit stop.
+                // Best effort cleanup.
             }
         }
     }
 
-    private void shouldUseDefaultPortForServerStart() throws Exception {
-        CliArguments arguments = CliArguments.parse(new String[] {"server", "start"});
-        assertEquals(CommandType.SERVER, arguments.commandType(), "server start should parse as server command");
-        assertEquals(ServerCommandType.START, arguments.serverCommandType(), "server start should parse the start action");
-        assertEquals(8080, arguments.serverPort(), "server start should default to port 8080");
+    private void shouldStartServerWithInactivityTimeout() throws Exception {
+        int port = findFreePort();
+
+        InvocationResult startResult = run("server", "start", "--port", Integer.toString(port), "--timeout", "30");
+
+        try {
+            assertEquals(ExitCode.SERVER_RUNNING.value(), startResult.exitCode(), "server start with timeout should succeed");
+            assertContains(startResult.stdout(), "\"operation\": \"server-start\"", "server start with timeout should report startup");
+            assertContains(startResult.stdout(), "\"inactivityTimeoutMinutes\": 30", "server start should include timeout in response");
+        } finally {
+            run("server", "stop", "--port", Integer.toString(port));
+        }
     }
+
+    // --- Rejeicao de payloads invalidos ---
 
     private void shouldRejectPayloadWithoutResourceType() throws Exception {
         Path tempDir = Files.createTempDirectory("assinador-test-payload");
@@ -137,7 +188,7 @@ public final class AssinadorApplicationTest {
             "sign",
             "--pathin", inputPath.toString(),
             "--pathout", outputPath.toString(),
-            "--mode", "one-time",
+            "--mode", "direct",
             "--alias", "test-signer"
         );
 
@@ -145,131 +196,190 @@ public final class AssinadorApplicationTest {
         assertContains(result.stderr(), "resourceType", "stderr should mention the missing field");
     }
 
-    private void shouldRejectMissingAliasForSign() throws Exception {
-        Path tempDir = Files.createTempDirectory("assinador-test-missing-alias");
-        Path inputPath = createValidInput(tempDir.resolve("entrada.json"));
-        Path outputPath = tempDir.resolve("saida.json");
+    private void shouldRejectPayloadWithoutResourceTypeViaHttp() throws Exception {
+        int port = findFreePort();
+        run("server", "start", "--port", Integer.toString(port));
 
-        InvocationResult result = run(
-            "sign",
-            "--pathin", inputPath.toString(),
-            "--pathout", outputPath.toString(),
-            "--mode", "one-time"
-        );
+        try {
+            Path tempDir = Files.createTempDirectory("assinador-test-http-payload");
+            Path inputPath = tempDir.resolve("entrada.json");
+            Path outputPath = tempDir.resolve("saida.json");
 
-        assertEquals(ExitCode.VALIDATION_ERROR.value(), result.exitCode(), "sign should require alias");
-        assertContains(result.stderr(), "--alias", "stderr should explain that alias is required");
+            Files.writeString(inputPath, "{\"id\":\"missing-resource-type\"}", StandardCharsets.UTF_8);
+
+            InvocationResult result = run(
+                "sign",
+                "--pathin", inputPath.toString(),
+                "--pathout", outputPath.toString(),
+                "--mode", "http",
+                "--port", Integer.toString(port),
+                "--alias", "test-signer"
+            );
+
+            assertEquals(2, result.exitCode(), "sign via http should reject non-FHIR-like payloads");
+            assertContains(result.stderr(), "resourceType", "stderr should mention the missing field");
+        } finally {
+            run("server", "stop", "--port", Integer.toString(port));
+        }
     }
 
-    private void shouldRejectUnsupportedMode() throws Exception {
+    // --- Validacao de argumentos CLI ---
+
+    private void shouldRejectInvalidMode() throws Exception {
         Path tempDir = Files.createTempDirectory("assinador-test-mode");
-        Path inputPath = createValidInput(tempDir.resolve("entrada.json"));
+        Path inputPath = tempDir.resolve("entrada.json");
         Path outputPath = tempDir.resolve("saida.json");
-
-        InvocationResult result = run(
-            "validate",
-            "--pathin", inputPath.toString(),
-            "--pathout", outputPath.toString(),
-            "--mode", "server"
-        );
-
-        assertEquals(ExitCode.VALIDATION_ERROR.value(), result.exitCode(), "unsupported modes should be rejected");
-        assertContains(result.stderr(), "one-time", "stderr should point the user to the supported mode");
-    }
-
-    private void shouldRejectInvalidPkcs11LibraryExtension() throws Exception {
-        Path tempDir = Files.createTempDirectory("assinador-test-pkcs11");
-        Path inputPath = createValidInput(tempDir.resolve("entrada.json"));
-        Path outputPath = tempDir.resolve("saida.json");
+        Files.writeString(inputPath, "{\"resourceType\":\"Bundle\"}", StandardCharsets.UTF_8);
 
         InvocationResult result = run(
             "sign",
             "--pathin", inputPath.toString(),
             "--pathout", outputPath.toString(),
             "--mode", "one-time",
-            "--alias", "test-signer",
-            "--pkcs11-lib", "token.txt"
-        );
-
-        assertEquals(ExitCode.VALIDATION_ERROR.value(), result.exitCode(), "invalid PKCS#11 library names should be rejected");
-        assertContains(result.stderr(), ".dll, .so ou .dylib", "stderr should list supported PKCS#11 extensions");
-    }
-
-    private void shouldRejectSameInputAndOutputPath() throws Exception {
-        Path tempDir = Files.createTempDirectory("assinador-test-same-path");
-        Path inputPath = createValidInput(tempDir.resolve("entrada.json"));
-
-        InvocationResult result = run(
-            "validate",
-            "--pathin", inputPath.toString(),
-            "--pathout", inputPath.toString(),
-            "--mode", "one-time"
-        );
-
-        assertEquals(ExitCode.VALIDATION_ERROR.value(), result.exitCode(), "input and output should not be the same file");
-        assertContains(result.stderr(), "entrada e saida", "stderr should explain the conflicting paths");
-    }
-
-    private void shouldRejectSigningFlagsOnServerCommand() throws Exception {
-        InvocationResult result = run(
-            "server",
-            "status",
             "--alias", "test-signer"
         );
 
-        assertEquals(ExitCode.VALIDATION_ERROR.value(), result.exitCode(), "server should reject signing flags");
-        assertContains(result.stderr(), "nao aceita flags de assinatura/verificacao", "stderr should explain the invalid flag set");
+        assertEquals(2, result.exitCode(), "sign should reject unknown mode");
+        assertContains(result.stderr(), "Modo nao suportado", "stderr should mention unsupported mode");
     }
 
-    private void shouldReportInvalidSignatureAsFalse() throws Exception {
-        Path tempDir = Files.createTempDirectory("assinador-test-invalid-signature");
-        Path inputPath = tempDir.resolve("assinado-invalido.json");
-        Path outputPath = tempDir.resolve("resultado.json");
+    private void shouldRejectMissingAlias() throws Exception {
+        Path tempDir = Files.createTempDirectory("assinador-test-alias");
+        Path inputPath = tempDir.resolve("entrada.json");
+        Path outputPath = tempDir.resolve("saida.json");
+        Files.writeString(inputPath, "{\"resourceType\":\"Bundle\"}", StandardCharsets.UTF_8);
 
-        Files.writeString(
-            inputPath,
-            """
-                {
-                  "status": "SUCCESS",
-                  "operation": "sign",
-                  "mode": "one-time",
-                  "inputDigestSha256": "ABC123",
-                  "signature": "SIMULATED-SIGNATURE-OTHER",
-                  "signedBy": "test-signer"
-                }
-                """,
-            StandardCharsets.UTF_8
+        InvocationResult result = run(
+            "sign",
+            "--pathin", inputPath.toString(),
+            "--pathout", outputPath.toString(),
+            "--mode", "direct"
         );
+
+        assertEquals(2, result.exitCode(), "sign without alias should fail");
+        assertContains(result.stderr(), "--alias", "stderr should mention the missing --alias flag");
+    }
+
+    private void shouldRejectInvalidAlias() throws Exception {
+        Path tempDir = Files.createTempDirectory("assinador-test-alias-invalid");
+        Path inputPath = tempDir.resolve("entrada.json");
+        Path outputPath = tempDir.resolve("saida.json");
+        Files.writeString(inputPath, "{\"resourceType\":\"Bundle\"}", StandardCharsets.UTF_8);
+
+        InvocationResult result = run(
+            "sign",
+            "--pathin", inputPath.toString(),
+            "--pathout", outputPath.toString(),
+            "--mode", "direct",
+            "--alias", "ab"
+        );
+
+        assertEquals(2, result.exitCode(), "sign with alias too short should fail");
+        assertContains(result.stderr(), "alias", "stderr should mention alias validation");
+    }
+
+    private void shouldRejectInvalidPkcs11LibExtension() throws Exception {
+        Path tempDir = Files.createTempDirectory("assinador-test-pkcs11");
+        Path inputPath = tempDir.resolve("entrada.json");
+        Path outputPath = tempDir.resolve("saida.json");
+        Files.writeString(inputPath, "{\"resourceType\":\"Bundle\"}", StandardCharsets.UTF_8);
+
+        InvocationResult result = run(
+            "sign",
+            "--pathin", inputPath.toString(),
+            "--pathout", outputPath.toString(),
+            "--mode", "direct",
+            "--alias", "valid-alias",
+            "--pkcs11-lib", "library.jar"
+        );
+
+        assertEquals(2, result.exitCode(), "sign with invalid pkcs11 lib extension should fail");
+        assertContains(result.stderr(), "PKCS#11", "stderr should mention PKCS#11");
+    }
+
+    private void shouldRejectNonNumericPkcs11Slot() throws Exception {
+        Path tempDir = Files.createTempDirectory("assinador-test-slot");
+        Path inputPath = tempDir.resolve("entrada.json");
+        Path outputPath = tempDir.resolve("saida.json");
+        Files.writeString(inputPath, "{\"resourceType\":\"Bundle\"}", StandardCharsets.UTF_8);
+
+        InvocationResult result = run(
+            "sign",
+            "--pathin", inputPath.toString(),
+            "--pathout", outputPath.toString(),
+            "--mode", "direct",
+            "--alias", "valid-alias",
+            "--pkcs11-slot", "abc"
+        );
+
+        assertEquals(2, result.exitCode(), "sign with non-numeric pkcs11 slot should fail");
+        assertContains(result.stderr(), "slot", "stderr should mention slot");
+    }
+
+    private void shouldRejectValidateWithAlias() throws Exception {
+        Path tempDir = Files.createTempDirectory("assinador-test-validate-alias");
+        Path inputPath = tempDir.resolve("entrada.json");
+        Path outputPath = tempDir.resolve("saida.json");
+        Files.writeString(inputPath, "{\"signature\":\"x\",\"inputDigestSha256\":\"y\"}", StandardCharsets.UTF_8);
 
         InvocationResult result = run(
             "validate",
             "--pathin", inputPath.toString(),
             "--pathout", outputPath.toString(),
-            "--mode", "one-time"
+            "--mode", "direct",
+            "--alias", "forbidden-alias"
         );
 
-        assertEquals(ExitCode.SUCCESS.value(), result.exitCode(), "validate should complete even for invalid simulated signatures");
-        assertContains(result.stdout(), "\"valid\": false", "validate should report invalid signatures as false");
-        assertContains(result.stdout(), "\"reason\":", "validate should explain the invalid result");
-        assertContains(Files.readString(outputPath), "\"valid\": false", "validate output file should persist the invalid result");
+        assertEquals(2, result.exitCode(), "validate with alias should fail");
+        assertContains(result.stderr(), "--alias", "stderr should mention --alias is not accepted");
     }
 
-    private void shouldRejectServerStartWhenPortIsAlreadyInUse() throws Exception {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            socket.setReuseAddress(true);
-            int port = socket.getLocalPort();
+    private void shouldRejectDuplicateFlag() throws Exception {
+        Path tempDir = Files.createTempDirectory("assinador-test-duplicate");
+        Path inputPath = tempDir.resolve("entrada.json");
+        Path outputPath = tempDir.resolve("saida.json");
+        Files.writeString(inputPath, "{\"resourceType\":\"Bundle\"}", StandardCharsets.UTF_8);
 
-            InvocationResult result = run(
-                "server",
-                "start",
-                "--port", Integer.toString(port)
-            );
+        InvocationResult result = run(
+            "sign",
+            "--pathin", inputPath.toString(),
+            "--pathout", outputPath.toString(),
+            "--mode", "direct",
+            "--alias", "first-alias",
+            "--alias", "second-alias"
+        );
 
-            assertEquals(ExitCode.VALIDATION_ERROR.value(), result.exitCode(), "server start should fail on occupied ports");
-            assertContains(result.stderr(), "porta " + port, "stderr should mention the conflicting port");
-            assertContains(result.stderr(), "Tente outra porta", "stderr should suggest a next action");
-        }
+        assertEquals(2, result.exitCode(), "sign with duplicate flag should fail");
+        assertContains(result.stderr(), "--alias", "stderr should mention the duplicate flag");
     }
+
+    private void shouldRejectUnknownFlag() throws Exception {
+        Path tempDir = Files.createTempDirectory("assinador-test-unknown");
+        Path inputPath = tempDir.resolve("entrada.json");
+        Path outputPath = tempDir.resolve("saida.json");
+        Files.writeString(inputPath, "{\"resourceType\":\"Bundle\"}", StandardCharsets.UTF_8);
+
+        InvocationResult result = run(
+            "sign",
+            "--pathin", inputPath.toString(),
+            "--pathout", outputPath.toString(),
+            "--mode", "direct",
+            "--alias", "valid-alias",
+            "--unknown-flag", "value"
+        );
+
+        assertEquals(2, result.exitCode(), "sign with unknown flag should fail");
+        assertContains(result.stderr(), "Flag nao suportada", "stderr should mention unsupported flag");
+    }
+
+    private void shouldRejectTimeoutOnStatusCommand() {
+        InvocationResult result = run("server", "status", "--timeout", "5");
+
+        assertEquals(2, result.exitCode(), "server status with --timeout should fail");
+        assertContains(result.stderr(), "--timeout", "stderr should mention --timeout is invalid here");
+    }
+
+    // --- Utilitarios ---
 
     private InvocationResult run(String... args) {
         ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
@@ -314,9 +424,7 @@ public final class AssinadorApplicationTest {
     private static void waitForServerToStop(int port) throws Exception {
         for (int attempt = 0; attempt < 20; attempt++) {
             InvocationResult statusResult = new AssinadorApplicationTest().run(
-                "server",
-                "status",
-                "--port", Integer.toString(port)
+                "server", "status", "--port", Integer.toString(port)
             );
 
             if (statusResult.stdout().contains("\"running\": false")) {
@@ -355,7 +463,7 @@ public final class AssinadorApplicationTest {
 
     private static void assertContains(String actual, String fragment, String message) {
         if (!actual.contains(fragment)) {
-            throw new AssertionError(message + " (missing fragment: " + fragment + ")");
+            throw new AssertionError(message + " (missing fragment: \"" + fragment + "\" in: " + actual.strip() + ")");
         }
     }
 

@@ -9,8 +9,7 @@ import java.util.regex.Pattern;
 
 final class CliArguments {
     private static final Pattern ALIAS_PATTERN = Pattern.compile("[A-Za-z0-9_-]{3,64}");
-    private static final Pattern SLOT_PATTERN = Pattern.compile("\\d+");
-    private static final Pattern PORT_PATTERN = Pattern.compile("\\d+");
+    private static final Pattern DIGITS_PATTERN = Pattern.compile("\\d+");
     private static final int DEFAULT_SERVER_PORT = 8080;
 
     private final CommandType commandType;
@@ -22,6 +21,7 @@ final class CliArguments {
     private final String pkcs11Slot;
     private final ServerCommandType serverCommandType;
     private final Integer serverPort;
+    private final Integer inactivityTimeoutMinutes;
 
     private CliArguments(
         CommandType commandType,
@@ -32,7 +32,8 @@ final class CliArguments {
         String pkcs11Library,
         String pkcs11Slot,
         ServerCommandType serverCommandType,
-        Integer serverPort
+        Integer serverPort,
+        Integer inactivityTimeoutMinutes
     ) {
         this.commandType = commandType;
         this.inputPath = inputPath;
@@ -43,6 +44,7 @@ final class CliArguments {
         this.pkcs11Slot = pkcs11Slot;
         this.serverCommandType = serverCommandType;
         this.serverPort = serverPort;
+        this.inactivityTimeoutMinutes = inactivityTimeoutMinutes;
     }
 
     static CliArguments parse(String[] args) throws ValidationException {
@@ -60,6 +62,10 @@ final class CliArguments {
     private static CliArguments parseSigningCommand(CommandType commandType, String[] rawArgs) throws ValidationException {
         Map<String, String> flags = parseFlags(rawArgs);
 
+        if (flags.containsKey("--timeout")) {
+            throw new ValidationException("A flag --timeout so e valida para server start.\n" + usage());
+        }
+
         String rawPathIn = requireFlag(flags, "--pathin");
         String rawPathOut = requireFlag(flags, "--pathout");
         String rawMode = requireFlag(flags, "--mode");
@@ -71,10 +77,15 @@ final class CliArguments {
         Path outputPath = Path.of(rawPathOut).toAbsolutePath().normalize();
         OperationMode mode = OperationMode.fromCliName(rawMode);
 
+        Integer serverPort = parseOptionalPort(flags.get("--port"));
+        if (mode == OperationMode.HTTP && serverPort == null) {
+            serverPort = DEFAULT_SERVER_PORT;
+        }
+
         validatePaths(inputPath, outputPath);
         validateCommandSpecificFields(commandType, alias, pkcs11Library, pkcs11Slot);
 
-        return new CliArguments(commandType, inputPath, outputPath, mode, alias, pkcs11Library, pkcs11Slot, null, null);
+        return new CliArguments(commandType, inputPath, outputPath, mode, alias, pkcs11Library, pkcs11Slot, null, serverPort, null);
     }
 
     private static CliArguments parseServerCommand(String[] rawArgs) throws ValidationException {
@@ -94,12 +105,21 @@ final class CliArguments {
             throw new ValidationException("O comando server nao aceita flags de assinatura/verificacao.\n" + usage());
         }
 
+        if (serverCommandType != ServerCommandType.START && flags.containsKey("--timeout")) {
+            throw new ValidationException("A flag --timeout so e valida para server start.\n" + usage());
+        }
+
         Integer serverPort = parseOptionalPort(flags.get("--port"));
-        if (serverCommandType == ServerCommandType.START && serverPort == null) {
+        if (serverPort == null) {
             serverPort = DEFAULT_SERVER_PORT;
         }
 
-        return new CliArguments(CommandType.SERVER, null, null, null, null, null, null, serverCommandType, serverPort);
+        Integer inactivityTimeout = null;
+        if (serverCommandType == ServerCommandType.START) {
+            inactivityTimeout = parseOptionalTimeout(flags.get("--timeout"));
+        }
+
+        return new CliArguments(CommandType.SERVER, null, null, null, null, null, null, serverCommandType, serverPort, inactivityTimeout);
     }
 
     private static Map<String, String> parseFlags(String[] args) throws ValidationException {
@@ -141,7 +161,8 @@ final class CliArguments {
             || "--alias".equals(flag)
             || "--pkcs11-lib".equals(flag)
             || "--pkcs11-slot".equals(flag)
-            || "--port".equals(flag);
+            || "--port".equals(flag)
+            || "--timeout".equals(flag);
     }
 
     private static String requireFlag(Map<String, String> flags, String flag) throws ValidationException {
@@ -189,6 +210,10 @@ final class CliArguments {
             throw new ValidationException("O arquivo de entrada deve ter extensao .json.");
         }
 
+        if (!outputPath.getFileName().toString().toLowerCase().endsWith(".json")) {
+            throw new ValidationException("O arquivo de saida deve ter extensao .json.");
+        }
+
         if (inputPath.equals(outputPath)) {
             throw new ValidationException("Os caminhos de entrada e saida nao podem ser o mesmo arquivo.");
         }
@@ -215,6 +240,12 @@ final class CliArguments {
             }
         }
 
+        if (commandType == CommandType.VALIDATE) {
+            if (alias != null || pkcs11Library != null || pkcs11Slot != null) {
+                throw new ValidationException("O comando validate nao aceita --alias, --pkcs11-lib nem --pkcs11-slot.\n" + usage());
+            }
+        }
+
         if (pkcs11Library != null) {
             String normalized = pkcs11Library.toLowerCase();
             if (!(normalized.endsWith(".dll") || normalized.endsWith(".so") || normalized.endsWith(".dylib"))) {
@@ -222,7 +253,7 @@ final class CliArguments {
             }
         }
 
-        if (pkcs11Slot != null && !SLOT_PATTERN.matcher(pkcs11Slot).matches()) {
+        if (pkcs11Slot != null && !DIGITS_PATTERN.matcher(pkcs11Slot).matches()) {
             throw new ValidationException("O slot PKCS#11 deve ser um numero inteiro nao negativo.");
         }
     }
@@ -233,7 +264,7 @@ final class CliArguments {
             return null;
         }
 
-        if (!PORT_PATTERN.matcher(normalized).matches()) {
+        if (!DIGITS_PATTERN.matcher(normalized).matches()) {
             throw new ValidationException("A porta informada em --port deve ser numerica.");
         }
 
@@ -245,12 +276,32 @@ final class CliArguments {
         return port;
     }
 
+    private static Integer parseOptionalTimeout(String rawTimeout) throws ValidationException {
+        String normalized = normalizeNullable(rawTimeout);
+        if (normalized == null) {
+            return null;
+        }
+
+        if (!DIGITS_PATTERN.matcher(normalized).matches()) {
+            throw new ValidationException("O tempo limite informado em --timeout deve ser numerico (minutos).");
+        }
+
+        int timeout = Integer.parseInt(normalized);
+        if (timeout < 1) {
+            throw new ValidationException("O tempo limite em --timeout deve ser um numero positivo de minutos.");
+        }
+
+        return timeout;
+    }
+
     static String usage() {
         return """
             Uso:
-              sign --pathin <arquivo.json> --pathout <saida.json> --mode one-time --alias <nome> [--pkcs11-lib <lib>] [--pkcs11-slot <slot>]
-              validate --pathin <arquivo.json> --pathout <saida.json> --mode one-time
-              server start [--port <porta>]
+              sign --pathin <arquivo.json> --pathout <saida.json> --mode direct --alias <nome> [--pkcs11-lib <lib>] [--pkcs11-slot <slot>]
+              sign --pathin <arquivo.json> --pathout <saida.json> --mode http [--port <porta>] --alias <nome> [--pkcs11-lib <lib>] [--pkcs11-slot <slot>]
+              validate --pathin <arquivo.json> --pathout <saida.json> --mode direct
+              validate --pathin <arquivo.json> --pathout <saida.json> --mode http [--port <porta>]
+              server start [--port <porta>] [--timeout <minutos>]
               server status [--port <porta>]
               server stop [--port <porta>]
             """;
@@ -291,5 +342,8 @@ final class CliArguments {
     Integer serverPort() {
         return serverPort;
     }
-}
 
+    Integer inactivityTimeoutMinutes() {
+        return inactivityTimeoutMinutes;
+    }
+}
