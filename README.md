@@ -54,6 +54,6 @@ assinador-cli verificar `
 
 assinador-cli servidor iniciar --porta 8080
 assinador-cli servidor status --porta 8080
-assinador-cli servidor parar --porta 8080
+assinador-cli servidor parar --porta 8080"
 ```
 
