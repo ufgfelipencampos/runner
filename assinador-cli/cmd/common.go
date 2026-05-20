@@ -3,13 +3,11 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/felip/runner/assinador-cli/internal/runner"
 	"github.com/spf13/cobra"

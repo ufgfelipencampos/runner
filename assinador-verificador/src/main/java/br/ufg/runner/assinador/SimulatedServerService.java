@@ -155,7 +155,7 @@ final class SimulatedServerService {
 
     private static void handleSign(HttpExchange exchange) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendResponse(exchange, 405, buildErrorJson("METHOD_NOT_ALLOWED", "Metodo nao permitido. Use POST."));
+            sendResponse(exchange, 405, JsonErrorResponse.runtime("Metodo nao permitido. Use POST."));
             return;
         }
 
@@ -176,7 +176,7 @@ final class SimulatedServerService {
 
     private static void handleValidate(HttpExchange exchange) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendResponse(exchange, 405, buildErrorJson("METHOD_NOT_ALLOWED", "Metodo nao permitido. Use POST."));
+            sendResponse(exchange, 405, JsonErrorResponse.runtime("Metodo nao permitido. Use POST."));
             return;
         }
 
