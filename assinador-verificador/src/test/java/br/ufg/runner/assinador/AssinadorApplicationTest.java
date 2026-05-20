@@ -16,6 +16,7 @@ public final class AssinadorApplicationTest {
         suite.shouldStartStatusAndStopServer();
         suite.shouldStartServerWithInactivityTimeout();
         suite.shouldRejectPayloadWithoutResourceType();
+        suite.shouldRejectMalformedJson();
         suite.shouldRejectPayloadWithoutResourceTypeViaHttp();
         suite.shouldRejectInvalidMode();
         suite.shouldRejectMissingAlias();
@@ -60,6 +61,8 @@ public final class AssinadorApplicationTest {
         assertTrue(Files.exists(signedPath), "sign should create output file");
         assertContains(signResult.stdout(), "\"operation\": \"sign\"", "sign stdout should contain operation");
         assertContains(signResult.stdout(), "\"mode\": \"direct\"", "sign stdout should report direct mode");
+        assertContains(signResult.stdout(), "\"signatureScheme\": \"SIMULATED-SIGNATURE-V1\"", "sign stdout should expose a deterministic scheme");
+        assertTrue(!signResult.stdout().contains("generatedAt"), "sign stdout should not expose volatile timestamps");
         assertContains(Files.readString(signedPath), "\"signature\": \"SIMULATED-SIGNATURE-", "output file should contain simulated signature");
 
         InvocationResult validateResult = run(
@@ -73,6 +76,8 @@ public final class AssinadorApplicationTest {
         assertTrue(Files.exists(validationPath), "validate should create output file");
         assertContains(validateResult.stdout(), "\"valid\": true", "validate should report signature as valid");
         assertContains(validateResult.stdout(), "\"mode\": \"direct\"", "validate stdout should report direct mode");
+        assertContains(validateResult.stdout(), "\"validationScheme\": \"SIMULATED-SIGNATURE-V1\"", "validate stdout should expose a deterministic scheme");
+        assertTrue(!validateResult.stdout().contains("checkedAt"), "validate stdout should not expose volatile timestamps");
     }
 
     private void shouldSignAndValidateViaHttpMode() throws Exception {
@@ -194,6 +199,27 @@ public final class AssinadorApplicationTest {
 
         assertEquals(2, result.exitCode(), "sign should reject non-FHIR-like payloads");
         assertContains(result.stderr(), "resourceType", "stderr should mention the missing field");
+        assertContains(result.stderr(), "\"code\": \"INVALID_FHIR_PAYLOAD\"", "stderr should expose a structured error code");
+        assertContains(result.stderr(), "\"field\": \"resourceType\"", "stderr should expose the invalid field");
+    }
+
+    private void shouldRejectMalformedJson() throws Exception {
+        Path tempDir = Files.createTempDirectory("assinador-test-malformed-json");
+        Path inputPath = tempDir.resolve("entrada.json");
+        Path outputPath = tempDir.resolve("saida.json");
+
+        Files.writeString(inputPath, "{\"resourceType\": \"Bundle\"", StandardCharsets.UTF_8);
+
+        InvocationResult result = run(
+            "sign",
+            "--pathin", inputPath.toString(),
+            "--pathout", outputPath.toString(),
+            "--mode", "direct",
+            "--alias", "test-signer"
+        );
+
+        assertEquals(2, result.exitCode(), "sign should reject malformed JSON");
+        assertContains(result.stderr(), "\"code\": \"INVALID_JSON\"", "stderr should expose malformed JSON code");
     }
 
     private void shouldRejectPayloadWithoutResourceTypeViaHttp() throws Exception {
@@ -218,6 +244,8 @@ public final class AssinadorApplicationTest {
 
             assertEquals(2, result.exitCode(), "sign via http should reject non-FHIR-like payloads");
             assertContains(result.stderr(), "resourceType", "stderr should mention the missing field");
+            assertContains(result.stderr(), "\"code\": \"INVALID_FHIR_PAYLOAD\"", "stderr should expose a structured error code");
+            assertContains(result.stderr(), "\"field\": \"resourceType\"", "stderr should expose the invalid field");
         } finally {
             run("server", "stop", "--port", Integer.toString(port));
         }

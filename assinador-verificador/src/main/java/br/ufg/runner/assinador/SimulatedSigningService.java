@@ -8,16 +8,16 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
-import java.time.Instant;
 import java.util.HexFormat;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class SimulatedSigningService {
+    private static final String SIGNATURE_PREFIX = "SIMULATED-SIGNATURE-";
+    private static final String SIGNATURE_SCHEME = "SIMULATED-SIGNATURE-V1";
     private static final Pattern SIGNATURE_PATTERN = Pattern.compile("\"signature\"\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern DIGEST_PATTERN = Pattern.compile("\"inputDigestSha256\"\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern SIGNER_PATTERN = Pattern.compile("\"signedBy\"\\s*:\\s*\"([^\"]+)\"");
-    private static final Pattern ALIAS_PATTERN = Pattern.compile("[A-Za-z0-9_-]{3,64}");
 
     String execute(CliArguments arguments) throws Exception {
         return switch (arguments.commandType()) {
@@ -94,7 +94,7 @@ final class SimulatedSigningService {
 
         int statusCode = conn.getResponseCode();
         InputStream responseStream = statusCode >= 400 ? conn.getErrorStream() : conn.getInputStream();
-        String response = new String(responseStream.readAllBytes(), StandardCharsets.UTF_8);
+        String response = responseStream != null ? new String(responseStream.readAllBytes(), StandardCharsets.UTF_8) : "";
 
         if (statusCode >= 500) {
             throw new RuntimeException("Erro no servidor HTTP (status " + statusCode + "): " + response.strip());
@@ -115,21 +115,15 @@ final class SimulatedSigningService {
         String pkcs11Slot,
         String modeName
     ) throws Exception {
-        validateSignPayload(content);
-
-        if (alias == null || alias.isBlank()) {
-            throw new ValidationException("O parametro alias e obrigatorio para o comando sign.");
-        }
-
-        if (!ALIAS_PATTERN.matcher(alias).matches()) {
-            throw new ValidationException("O alias deve ter entre 3 e 64 caracteres e usar apenas letras, numeros, '-' ou '_'.");
-        }
+        JsonPayloadValidator.validateSignPayload(content);
+        JsonPayloadValidator.validateAlias(alias);
+        JsonPayloadValidator.validatePkcs11Library(pkcs11Library);
+        JsonPayloadValidator.validatePkcs11Slot(pkcs11Slot);
 
         String digest = sha256(content);
-        String signature = "SIMULATED-SIGNATURE-" + digest;
+        String signature = SIGNATURE_PREFIX + digest;
         String library = pkcs11Library == null ? "not-informed" : pkcs11Library;
         String slot = pkcs11Slot == null ? "not-informed" : pkcs11Slot;
-        String generatedAt = Instant.now().toString();
 
         return """
             {
@@ -137,34 +131,34 @@ final class SimulatedSigningService {
               "operation": "sign",
               "mode": "%s",
               "message": "Assinatura simulada gerada com sucesso.",
+              "digestAlgorithm": "SHA-256",
+              "signatureScheme": "%s",
               "inputDigestSha256": "%s",
               "signature": "%s",
               "signedBy": "%s",
               "pkcs11Library": "%s",
-              "pkcs11Slot": "%s",
-              "generatedAt": "%s"
+              "pkcs11Slot": "%s"
             }
             """.formatted(
             JsonEscaper.escape(modeName),
+            JsonEscaper.escape(SIGNATURE_SCHEME),
             JsonEscaper.escape(digest),
             JsonEscaper.escape(signature),
             JsonEscaper.escape(alias),
             JsonEscaper.escape(library),
-            JsonEscaper.escape(slot),
-            JsonEscaper.escape(generatedAt)
+            JsonEscaper.escape(slot)
         );
     }
 
     // Package-private: also called by SimulatedServerService HTTP handlers.
     static String validateContent(String content, String modeName) throws Exception {
-        validateValidatePayload(content);
+        JsonPayloadValidator.validateValidatePayload(content);
 
         String signature = requireField("signature", SIGNATURE_PATTERN, content);
         String digest = requireField("inputDigestSha256", DIGEST_PATTERN, content);
         String signer = optionalField(SIGNER_PATTERN, content, "unknown");
-        String expectedSignature = "SIMULATED-SIGNATURE-" + digest;
+        String expectedSignature = SIGNATURE_PREFIX + digest;
         boolean valid = expectedSignature.equals(signature);
-        String checkedAt = Instant.now().toString();
         String reason = valid
             ? "Assinatura simulada reconhecida e consistente com o digest."
             : "A assinatura simulada nao corresponde ao digest informado.";
@@ -175,54 +169,28 @@ final class SimulatedSigningService {
               "operation": "validate",
               "mode": "%s",
               "message": "Validacao simulada concluida.",
+              "validationScheme": "%s",
               "valid": %s,
               "reason": "%s",
               "inputDigestSha256": "%s",
               "signature": "%s",
-              "signedBy": "%s",
-              "checkedAt": "%s"
+              "signedBy": "%s"
             }
             """.formatted(
             JsonEscaper.escape(modeName),
+            JsonEscaper.escape(SIGNATURE_SCHEME),
             Boolean.toString(valid),
             JsonEscaper.escape(reason),
             JsonEscaper.escape(digest),
             JsonEscaper.escape(signature),
-            JsonEscaper.escape(signer),
-            JsonEscaper.escape(checkedAt)
+            JsonEscaper.escape(signer)
         );
-    }
-
-    private static void validateValidatePayload(String payload) throws ValidationException {
-        String normalized = payload.trim();
-        if (normalized.isEmpty()) {
-            throw new ValidationException("O conteudo do arquivo de entrada esta vazio.");
-        }
-
-        if (!(normalized.startsWith("{") && normalized.endsWith("}"))) {
-            throw new ValidationException("O arquivo de entrada deve conter um objeto JSON.");
-        }
-    }
-
-    private static void validateSignPayload(String payload) throws ValidationException {
-        String normalized = payload.trim();
-        if (normalized.isEmpty()) {
-            throw new ValidationException("O conteudo do arquivo de entrada esta vazio.");
-        }
-
-        if (!(normalized.startsWith("{") && normalized.endsWith("}"))) {
-            throw new ValidationException("O arquivo de entrada deve conter um objeto JSON.");
-        }
-
-        if (!normalized.contains("\"resourceType\"")) {
-            throw new ValidationException("O JSON de entrada precisa conter o campo resourceType.");
-        }
     }
 
     private static String requireField(String fieldName, Pattern pattern, String input) throws ValidationException {
         Matcher matcher = pattern.matcher(input);
         if (!matcher.find()) {
-            throw new ValidationException("O arquivo informado para validate nao contem o campo obrigatorio \"" + fieldName + "\".");
+            throw new ValidationException("MISSING_REQUIRED_FIELD", fieldName, "O arquivo informado para validate nao contem o campo obrigatorio \"" + fieldName + "\".");
         }
 
         return matcher.group(1);

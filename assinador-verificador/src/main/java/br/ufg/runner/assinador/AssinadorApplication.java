@@ -42,23 +42,12 @@ public final class AssinadorApplication {
 
             return ExitCode.SUCCESS.value();
         } catch (ValidationException error) {
-            stderr.println(errorAsJson("VALIDATION_ERROR", error.getMessage()));
+            stderr.println(JsonErrorResponse.validation(error));
             return ExitCode.VALIDATION_ERROR.value();
         } catch (Exception error) {
-            stderr.println(errorAsJson("RUNTIME_ERROR", error.getMessage()));
+            stderr.println(JsonErrorResponse.runtime(error.getMessage()));
             return ExitCode.RUNTIME_ERROR.value();
         }
-    }
-
-    private String errorAsJson(String type, String message) {
-        String safeMessage = message != null ? message : "Erro desconhecido.";
-        return """
-            {
-              "status": "ERROR",
-              "type": "%s",
-              "message": "%s"
-            }
-            """.formatted(JsonEscaper.escape(type), JsonEscaper.escape(safeMessage));
     }
 }
 

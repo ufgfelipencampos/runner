@@ -168,9 +168,9 @@ final class SimulatedServerService {
             String result = SimulatedSigningService.signContent(content, alias, pkcs11Library, pkcs11Slot, "http");
             sendResponse(exchange, 200, result);
         } catch (ValidationException error) {
-            sendResponse(exchange, 422, buildErrorJson("VALIDATION_ERROR", error.getMessage()));
+            sendResponse(exchange, 422, JsonErrorResponse.validation(error));
         } catch (Exception error) {
-            sendResponse(exchange, 500, buildErrorJson("RUNTIME_ERROR", error.getMessage()));
+            sendResponse(exchange, 500, JsonErrorResponse.runtime(error.getMessage()));
         }
     }
 
@@ -185,9 +185,9 @@ final class SimulatedServerService {
             String result = SimulatedSigningService.validateContent(content, "http");
             sendResponse(exchange, 200, result);
         } catch (ValidationException error) {
-            sendResponse(exchange, 422, buildErrorJson("VALIDATION_ERROR", error.getMessage()));
+            sendResponse(exchange, 422, JsonErrorResponse.validation(error));
         } catch (Exception error) {
-            sendResponse(exchange, 500, buildErrorJson("RUNTIME_ERROR", error.getMessage()));
+            sendResponse(exchange, 500, JsonErrorResponse.runtime(error.getMessage()));
         }
     }
 
@@ -261,17 +261,6 @@ final class SimulatedServerService {
         }
 
         return params;
-    }
-
-    private static String buildErrorJson(String type, String message) {
-        String safeMessage = message != null ? message : "Erro desconhecido.";
-        return """
-            {
-              "status": "ERROR",
-              "type": "%s",
-              "message": "%s"
-            }
-            """.formatted(JsonEscaper.escape(type), JsonEscaper.escape(safeMessage));
     }
 
     private static void scheduleInactivityTimeout(int port, ServerEntry entry, int timeoutMinutes) {
