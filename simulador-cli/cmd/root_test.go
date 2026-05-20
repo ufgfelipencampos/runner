@@ -13,9 +13,74 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
+// --- integração: ciclo completo status → parar → status ---
+
+func TestLifecycleStatusPararStatus(t *testing.T) {
+	shutdownReceived := make(chan struct{})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/info":
+			fmt.Fprint(w, `{"status":"ONLINE","version":"test"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/shutdown":
+			fmt.Fprint(w, `{"status":"SUCCESS","message":"Simulador encerrado."}`)
+			go func() { close(shutdownReceived) }()
+		}
+	}))
+	defer srv.Close()
+
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+	portStr := strconv.Itoa(port)
+
+	// 1. status com servidor ativo → ONLINE
+	stdout, _, err := executeRootCommand("status", "--porta", portStr)
+	if err != nil {
+		t.Fatalf("status: unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "ONLINE") {
+		t.Fatalf("status: expected ONLINE, got: %s", stdout)
+	}
+
+	// 2. parar → envia POST /shutdown
+	_, _, err = executeRootCommand("parar", "--porta", portStr)
+	if err != nil {
+		t.Fatalf("parar: unexpected error: %v", err)
+	}
+	select {
+	case <-shutdownReceived:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("parar: /shutdown nao foi chamado dentro do timeout")
+	}
+
+	// 3. simula desligamento: fecha o servidor fake
+	srv.Close()
+
+	// 4. status sem servidor → OFFLINE (sem erro de processo)
+	stdout, _, err = executeRootCommand("status", "--porta", portStr)
+	if err != nil {
+		t.Fatalf("status offline: unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "OFFLINE") {
+		t.Fatalf("status offline: expected OFFLINE, got: %s", stdout)
+	}
+}
+
 // --- iniciar ---
+
+func TestIniciarRejectsPortAlreadyInUse(t *testing.T) {
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	_, _, err = executeRootCommand("iniciar", "--porta", strconv.Itoa(port))
+	assertValidationError(t, err, "ja esta em uso")
+}
 
 func TestIniciarRejectsPortZero(t *testing.T) {
 	_, _, err := executeRootCommand("iniciar", "--porta", "0")
@@ -34,13 +99,17 @@ func TestIniciarStartsJarWithCorrectPort(t *testing.T) {
 		t.Fatalf("failed to write jar: %v", err)
 	}
 
+	// Obtém uma porta livre e a libera imediatamente para o comando usar
+	freePort := findFreePort(t)
+
 	javaPath, logPath := createFakeJavaForCommandTests(t)
 	t.Setenv("FAKE_JAVA_BEHAVIOR", "start_success")
 	t.Setenv("FAKE_JAVA_LOG", logPath)
 
+	portStr := strconv.Itoa(freePort)
 	stdout, stderr, err := executeRootCommand(
 		"iniciar",
-		"--porta", "8443",
+		"--porta", portStr,
 		"--java-bin", javaPath,
 		"--jar", jarPath,
 	)
@@ -59,7 +128,7 @@ func TestIniciarStartsJarWithCorrectPort(t *testing.T) {
 		t.Fatalf("failed to read fake java log: %v", err)
 	}
 	logContent := string(logBytes)
-	if !strings.Contains(logContent, "server start") || !strings.Contains(logContent, "--port 8443") {
+	if !strings.Contains(logContent, "server start") || !strings.Contains(logContent, "--port "+portStr) {
 		t.Fatalf("unexpected log content: %s", logContent)
 	}
 }
@@ -172,6 +241,18 @@ func TestStatusReturnsOfflineWhenNotRunning(t *testing.T) {
 }
 
 // --- helpers ---
+
+// findFreePort abre e fecha imediatamente um listener para obter uma porta livre.
+func findFreePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("failed to find free port: %v", err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	return port
+}
 
 func executeRootCommand(args ...string) (string, string, error) {
 	rootCmd := NewRootCommand()

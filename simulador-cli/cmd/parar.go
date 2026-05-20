@@ -15,9 +15,14 @@ func newPararCmd() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "parar",
 		Short: "Envia requisicao de encerramento ao simulador em execucao",
-		Args:  cobra.NoArgs,
+		Long: `Envia HTTP POST /shutdown ao simulador em execucao na porta indicada.
+
+Se o simulador nao estiver respondendo na porta, retorna erro com codigo de saida 1.
+Use 'simulador-cli status' para verificar se o simulador esta ativo antes de parar.`,
+		Args: cobra.NoArgs,
 		Example: "  simulador-cli parar\n" +
-			"  simulador-cli parar --porta 8443",
+			"  simulador-cli parar --porta 8443\n" +
+			"  simulador-cli parar --porta 9000",
 		RunE: options.run,
 	}
 

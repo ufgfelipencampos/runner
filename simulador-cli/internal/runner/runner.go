@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,6 +24,16 @@ type Result struct {
 	Stderr   string
 	ExitCode int
 	PID      int
+}
+
+// IsPortInUse verifica via TCP se algo já está escutando na porta.
+func IsPortInUse(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", port), time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 // Stop envia POST /shutdown ao simulador em execucao na porta indicada.
@@ -43,17 +54,31 @@ func Stop(port int) (Result, error) {
 }
 
 // Status consulta GET /api/info no simulador em execucao.
-// Retorna JSON do servico se ativo, ou mensagem de OFFLINE se nao responder.
+// Três estados possíveis:
+//   - OFFLINE   : nenhum processo responde na porta
+//   - RUNNING   : processo responde, mas /api/info retornou status não-2xx
+//   - (corpo)   : /api/info retornou 2xx — repassa o JSON do simulador
 func Status(port int) (Result, error) {
 	url := fmt.Sprintf("http://localhost:%d/api/info", port)
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		offline := fmt.Sprintf(`{"status":"OFFLINE","port":%d,"message":"Simulador nao responde na porta %d."}`, port, port)
+		offline := fmt.Sprintf(
+			`{"status":"OFFLINE","port":%d,"message":"Simulador nao responde na porta %d."}`,
+			port, port,
+		)
 		return Result{Stdout: offline}, nil
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		running := fmt.Sprintf(
+			`{"status":"RUNNING","port":%d,"message":"Servidor ativo na porta %d, mas GET /api/info retornou %d. Aguardando simulador.jar real."}`,
+			port, port, resp.StatusCode,
+		)
+		return Result{Stdout: running}, nil
+	}
 
 	body, _ := io.ReadAll(resp.Body)
 	return Result{Stdout: string(body)}, nil

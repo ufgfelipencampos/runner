@@ -12,6 +12,27 @@ import (
 	"testing"
 )
 
+// --- IsPortInUse ---
+
+func TestIsPortInUseWhenListening(t *testing.T) {
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	if !IsPortInUse(port) {
+		t.Fatalf("expected port %d to be reported as in use", port)
+	}
+}
+
+func TestIsPortInUseWhenFree(t *testing.T) {
+	if IsPortInUse(59980) {
+		t.Fatalf("expected port 59980 to be reported as free")
+	}
+}
+
 // --- StartServer ---
 
 func TestStartServerReturnsStartupJSON(t *testing.T) {
@@ -151,6 +172,27 @@ func TestStatusReturnsOnlineWhenRunning(t *testing.T) {
 	}
 	if !strings.Contains(result.Stdout, "ONLINE") {
 		t.Fatalf("unexpected result: %s", result.Stdout)
+	}
+}
+
+func TestStatusReturnsRunningWhenEndpointNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, "<h1>404 Not Found</h1>")
+	}))
+	defer srv.Close()
+
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+
+	result, err := Status(port)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result.Stdout, "RUNNING") {
+		t.Fatalf("expected RUNNING when server is up but endpoint missing, got: %s", result.Stdout)
+	}
+	if !strings.Contains(result.Stdout, "404") {
+		t.Fatalf("expected status code 404 in message, got: %s", result.Stdout)
 	}
 }
 
