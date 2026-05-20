@@ -30,7 +30,11 @@ func newAssinarCmd() *cobra.Command {
 	flags := command.Flags()
 	flags.StringVar(&options.Entrada, "entrada", "", "Arquivo JSON de entrada.")
 	flags.StringVar(&options.Saida, "saida", "", "Arquivo JSON de saida.")
-	flags.StringVar(&options.Modo, "modo", "", "Modo de execucao: direto ou http.")
+	flags.StringVar(&options.Modo, "modo", "auto",
+		"Estrategia de execucao: auto, http ou direto.\n"+
+			"  auto   (padrao): Tenta servidor HTTP, fallback para direto se indisponivel.\n"+
+			"  http   : Usa apenas servidor HTTP, falha se indisponivel.\n"+
+			"  direto : Usa apenas execucao direta (sem servidor).")
 	flags.StringVar(&options.Alias, "alias", "", "Alias do assinador.")
 	flags.StringVar(&options.BibliotecaPKCS11, "biblioteca-pkcs11", "", "Biblioteca PKCS#11 opcional.")
 	flags.StringVar(&options.SlotPKCS11, "slot-pkcs11", "", "Slot PKCS#11 opcional.")
@@ -54,23 +58,28 @@ func (o *assinarOptions) run(command *cobra.Command, _ []string) error {
 		return err
 	}
 
-	mode, err := modeToJarValue(o.Modo)
+	// Converte --modo para estratégia
+	strategy, err := ParseExecutionStrategy(o.Modo)
 	if err != nil {
 		return err
 	}
-	if err := ensurePort(command, mode, o.Porta); err != nil {
-		return err
+
+	// Se HTTP foi forçado, valida porta
+	if strategy == StrategyHTTP {
+		if err := ensurePort(command, "http", o.Porta); err != nil {
+			return err
+		}
 	}
 
+	// Constrói argumentos para JAR (sem --mode, será adicionado por RunWithStrategy)
 	args := []string{
 		"sign",
 		"--pathin", o.Entrada,
 		"--pathout", o.Saida,
-		"--mode", mode,
 		"--alias", o.Alias,
 	}
-	args = appendPortIfNeeded(args, mode, o.Porta)
 
+	// Adiciona PKCS#11 se fornecido
 	if o.BibliotecaPKCS11 != "" {
 		args = append(args, "--pkcs11-lib", o.BibliotecaPKCS11)
 	}
@@ -78,7 +87,9 @@ func (o *assinarOptions) run(command *cobra.Command, _ []string) error {
 		args = append(args, "--pkcs11-slot", o.SlotPKCS11)
 	}
 
-	result, err := newRunnerConfig(o.runtimeFlags).Run(args)
+	// Usa RunWithStrategy para seleção automática de modo
+	config := newRunnerConfig(o.runtimeFlags)
+	result, err := config.RunWithStrategy(args, strategy.String(), o.Porta)
 	if err != nil {
 		return wrapRuntimeError(err)
 	}

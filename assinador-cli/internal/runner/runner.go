@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -21,6 +23,110 @@ type Result struct {
 	Stderr   string
 	ExitCode int
 	PID      int
+}
+
+// IsServerAvailable verifica se o servidor responde na porta dada
+// Usa teste de conexão TCP (funciona independente de implementação HTTP)
+// Retorna true se conexão sucede, false se timeout ou recusada
+func IsServerAvailable(port int, timeoutSecs int) bool {
+	address := fmt.Sprintf("localhost:%d", port)
+	timeout := time.Duration(timeoutSecs) * time.Second
+
+	conn, err := net.DialTimeout("tcp", address, timeout)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+
+	return true
+}
+
+// DetermineExecutionMode decide o modo final baseado na estratégia
+// Para "auto": retorna "http" se servidor disponível, senão "direct"
+// Para "http": retorna "http"
+// Para "direct": retorna "direct"
+func DetermineExecutionMode(strategy string, port int) (string, error) {
+	switch strings.ToLower(strategy) {
+	case "direct":
+		return "direct", nil
+
+	case "http":
+		return "http", nil
+
+	case "auto":
+		// Tenta HTTP com 1 segundo de timeout
+		if IsServerAvailable(port, 1) {
+			return "http", nil
+		}
+		// Fallback para direto
+		return "direct", nil
+
+	default:
+		return "", fmt.Errorf("estrategia desconhecida: %s", strategy)
+	}
+}
+
+// ApplyExecutionMode modifica os argumentos do comando para setar --mode e --port
+// Remove qualquer flag --mode existente, adiciona nova --mode, e --port se necessário
+func ApplyExecutionMode(args []string, mode string, port int) []string {
+	// Remove flag --mode existente
+	filtered := RemoveModeFromArgs(args)
+
+	// Adiciona nova --mode
+	filtered = append(filtered, "--mode", mode)
+
+	// Adiciona --port se modo é http e não está presente
+	if mode == "http" {
+		hasPort := false
+		for j := 0; j < len(filtered); j++ {
+			if filtered[j] == "--port" {
+				hasPort = true
+				break
+			}
+		}
+		if !hasPort {
+			filtered = append(filtered, "--port", fmt.Sprintf("%d", port))
+		}
+	}
+
+	return filtered
+}
+
+// RemoveModeFromArgs remove qualquer flag --mode e seu valor dos argumentos
+func RemoveModeFromArgs(args []string) []string {
+	result := []string{}
+	i := 0
+	for i < len(args) {
+		if args[i] == "--mode" {
+			i += 2 // Pula flag e valor
+			continue
+		}
+		result = append(result, args[i])
+		i++
+	}
+	return result
+}
+
+// RunWithStrategy executa com seleção automática de modo baseada na estratégia
+// Se strategy é "auto": tenta HTTP primeiro, fallback para direto se necessário
+// Se strategy é "http": força modo HTTP
+// Se strategy é "direct": força modo direto
+func (c Config) RunWithStrategy(args []string, strategy string, port int) (Result, error) {
+	if err := c.Validate(); err != nil {
+		return Result{}, err
+	}
+
+	// Determina modo final baseado em estratégia e disponibilidade
+	mode, err := DetermineExecutionMode(strategy, port)
+	if err != nil {
+		return Result{}, err
+	}
+
+	// Aplica modo aos argumentos
+	finalArgs := ApplyExecutionMode(args, mode, port)
+
+	// Executa com modo determinado
+	return c.Run(finalArgs)
 }
 
 func (c Config) Run(args []string) (Result, error) {

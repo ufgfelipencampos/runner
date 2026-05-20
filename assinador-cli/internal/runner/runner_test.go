@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -142,4 +143,120 @@ func createFakeJava(t *testing.T) (string, string) {
 		t.Fatalf("failed to write fake java script: %v", err)
 	}
 	return javaPath, logPath
+}
+
+// Testes para ExecutionStrategy e modo automático
+func TestIsServerAvailableWhenListening(t *testing.T) {
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("falha ao criar listener: %v", err)
+	}
+	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	if !IsServerAvailable(port, 1) {
+		t.Fatalf("esperava que servidor estivesse disponivel na porta %d", port)
+	}
+}
+
+func TestIsServerAvailableWhenNotListening(t *testing.T) {
+	// Usa uma porta que dificilmente estará em uso
+	if IsServerAvailable(59999, 1) {
+		t.Fatalf("esperava que servidor nao estivesse disponivel na porta 59999")
+	}
+}
+
+func TestDetermineExecutionModeDirect(t *testing.T) {
+	mode, err := DetermineExecutionMode("direct", 8080)
+	if err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if mode != "direct" {
+		t.Fatalf("esperava 'direct', obteve %q", mode)
+	}
+}
+
+func TestDetermineExecutionModeHTTP(t *testing.T) {
+	mode, err := DetermineExecutionMode("http", 8080)
+	if err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if mode != "http" {
+		t.Fatalf("esperava 'http', obteve %q", mode)
+	}
+}
+
+func TestDetermineExecutionModeAutoWithServer(t *testing.T) {
+	listener, _ := net.Listen("tcp", "localhost:0")
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	mode, err := DetermineExecutionMode("auto", port)
+	if err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if mode != "http" {
+		t.Fatalf("esperava 'http' com servidor disponivel, obteve %q", mode)
+	}
+}
+
+func TestDetermineExecutionModeAutoWithoutServer(t *testing.T) {
+	mode, err := DetermineExecutionMode("auto", 59999)
+	if err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if mode != "direct" {
+		t.Fatalf("esperava 'direct' sem servidor, obteve %q", mode)
+	}
+}
+
+func TestApplyExecutionModeAddsMode(t *testing.T) {
+	args := []string{"sign", "--pathin", "e.json", "--pathout", "s.json"}
+	result := ApplyExecutionMode(args, "http", 8080)
+
+	hasMode := false
+	hasPort := false
+	for i := 0; i < len(result)-1; i++ {
+		if result[i] == "--mode" && result[i+1] == "http" {
+			hasMode = true
+		}
+		if result[i] == "--port" && result[i+1] == "8080" {
+			hasPort = true
+		}
+	}
+
+	if !hasMode {
+		t.Fatalf("flag --mode nao foi adicionada aos argumentos: %v", result)
+	}
+	if !hasPort {
+		t.Fatalf("flag --port nao foi adicionada para modo http: %v", result)
+	}
+}
+
+func TestApplyExecutionModeRemovesExistingMode(t *testing.T) {
+	args := []string{"sign", "--mode", "direct", "--pathin", "e.json"}
+	result := ApplyExecutionMode(args, "http", 8080)
+
+	count := 0
+	for i := 0; i < len(result); i++ {
+		if result[i] == "--mode" {
+			count++
+		}
+	}
+
+	if count != 1 {
+		t.Fatalf("esperava exatamente uma flag --mode, encontrou %d em: %v", count, result)
+	}
+}
+
+func TestRemoveModeFromArgs(t *testing.T) {
+	args := []string{"sign", "--mode", "direct", "--pathin", "e.json", "--mode", "http"}
+	result := RemoveModeFromArgs(args)
+
+	for i := 0; i < len(result); i++ {
+		if result[i] == "--mode" {
+			t.Fatalf("flag --mode nao foi removida: %v", result)
+		}
+	}
 }

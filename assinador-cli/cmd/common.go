@@ -3,11 +3,13 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/felip/runner/assinador-cli/internal/runner"
 	"github.com/spf13/cobra"
@@ -27,6 +29,44 @@ var (
 type runtimeFlags struct {
 	JavaBin string
 	JarPath string
+}
+
+// ExecutionStrategy define como o assinador.jar será invocado
+type ExecutionStrategy string
+
+const (
+	StrategyAuto   ExecutionStrategy = "auto"   // Tenta HTTP, fallback para direto
+	StrategyHTTP   ExecutionStrategy = "http"   // Força HTTP
+	StrategyDirect ExecutionStrategy = "direct" // Força direto
+)
+
+func (s ExecutionStrategy) String() string {
+	return string(s)
+}
+
+// ParseExecutionStrategy converte entrada do usuário para estratégia
+// Entrada vazia padrão para StrategyAuto (novo comportamento)
+func ParseExecutionStrategy(input string) (ExecutionStrategy, error) {
+	normalized := strings.ToLower(strings.TrimSpace(input))
+
+	// Padrão: string vazia mapeia para auto
+	if normalized == "" {
+		return StrategyAuto, nil
+	}
+
+	switch normalized {
+	case "auto":
+		return StrategyAuto, nil
+	case "http":
+		return StrategyHTTP, nil
+	case "direto", "direct": // Suporta português e inglês
+		return StrategyDirect, nil
+	default:
+		return "", validationError(
+			"Estrategia de modo invalida: %s. Use 'auto', 'http' ou 'direto'.",
+			input,
+		)
+	}
 }
 
 func bindRuntimeFlags(command *cobra.Command, target *runtimeFlags) {
