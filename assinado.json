@@ -1,0 +1,12 @@
+{
+  "status": "SUCCESS",
+  "operation": "sign",
+  "mode": "direct",
+  "message": "Assinatura simulada gerada com sucesso.",
+  "inputDigestSha256": "DB84AC2F348BF1FB98659F0483821036002365E6C968ACDBF3336EB7E63FC71C",
+  "signature": "SIMULATED-SIGNATURE-DB84AC2F348BF1FB98659F0483821036002365E6C968ACDBF3336EB7E63FC71C",
+  "signedBy": "demo-signer",
+  "pkcs11Library": "not-informed",
+  "pkcs11Slot": "not-informed",
+  "generatedAt": "2026-05-19T22:50:57.882308800Z"
+}

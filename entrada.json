@@ -1,0 +1,21 @@
+{
+  "resourceType": "Patient",
+  "id": "paciente-123",
+  "name": [
+    {
+      "use": "official",
+      "family": "Silva",
+      "given": ["João", "Maria"]
+    }
+  ],
+  "gender": "male",
+  "birthDate": "1990-01-15",
+  "address": [
+    {
+      "use": "home",
+      "city": "Goiânia",
+      "state": "GO",
+      "country": "BR"
+    }
+  ]
+}
