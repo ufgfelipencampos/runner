@@ -3,3 +3,5 @@ CLAUDE.md
 assinador-verificador/.idea/
 assinador-verificador/src/main/main.iml
 assinador-verificador/src/test/test.iml
+assinado.json 
+entrada.json
