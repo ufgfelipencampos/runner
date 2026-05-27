@@ -209,6 +209,89 @@ func TestStatusReturnsOfflineWhenNotRunning(t *testing.T) {
 	}
 }
 
+// --- validate (caminho é diretório) ---
+
+func TestValidateReturnsErrorWhenJarIsDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	javaPath, _ := createFakeJava(t)
+
+	_, err := Config{
+		JavaBin: javaPath,
+		JarPath: tempDir, // diretório, não arquivo
+	}.StartServer([]string{"server", "start", "--port", "8443"})
+	if err == nil {
+		t.Fatalf("expected error when jar path is a directory")
+	}
+	if !strings.Contains(err.Error(), "diretorio") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+// --- jarArgs ---
+
+func TestJarArgsContainsJarFlagAndPath(t *testing.T) {
+	c := Config{JavaBin: "java", JarPath: "/caminho/simulador.jar"}
+	args := c.jarArgs([]string{"server", "start", "--port", "8443"})
+
+	if len(args) < 4 {
+		t.Fatalf("expected at least 4 args, got %d: %v", len(args), args)
+	}
+	if args[0] != "-jar" {
+		t.Fatalf("expected args[0]==-jar, got %q", args[0])
+	}
+	if args[1] != "/caminho/simulador.jar" {
+		t.Fatalf("expected args[1]==jar path, got %q", args[1])
+	}
+	if args[2] != "server" || args[3] != "start" {
+		t.Fatalf("expected command args after jar path, got %v", args[2:])
+	}
+}
+
+// --- readFirstJSONObject ---
+
+func TestReadFirstJSONObjectParsesSimpleObject(t *testing.T) {
+	input := `{"status":"SUCCESS","operation":"server-start"}`
+	result, err := readFirstJSONObject(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != input {
+		t.Fatalf("expected %q, got %q", input, result)
+	}
+}
+
+func TestReadFirstJSONObjectSkipsLeadingWhitespace(t *testing.T) {
+	input := "   \n\t{\"status\":\"SUCCESS\"}"
+	result, err := readFirstJSONObject(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, `"status"`) {
+		t.Fatalf("expected parsed JSON, got: %q", result)
+	}
+}
+
+func TestReadFirstJSONObjectHandlesNestedObjects(t *testing.T) {
+	input := `{"outer":{"inner":"value"},"x":1}`
+	result, err := readFirstJSONObject(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "inner") {
+		t.Fatalf("expected nested key in result, got: %q", result)
+	}
+	if result != input {
+		t.Fatalf("expected complete object, got: %q", result)
+	}
+}
+
+func TestReadFirstJSONObjectReturnsErrorOnEmptyInput(t *testing.T) {
+	_, err := readFirstJSONObject(strings.NewReader(""))
+	if err == nil {
+		t.Fatalf("expected error on empty input")
+	}
+}
+
 // --- helpers ---
 
 func createFakeJava(t *testing.T) (string, string) {
