@@ -1,8 +1,8 @@
 package runner
 
 import (
-	"bufio"
-	"bytes"
+	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -10,13 +10,16 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type Config struct {
-	JavaBin string
-	JarPath string
+	JavaBin        string
+	JarPath        string
+	HealthCheckURL string // substitui https://localhost:{port}/actuator/health; usado em testes
 }
 
 type Result struct {
@@ -36,36 +39,49 @@ func IsPortInUse(port int) bool {
 	return true
 }
 
-// Stop envia POST /shutdown ao simulador em execucao na porta indicada.
+// Stop encerra o simulador lendo o PID salvo em ~/.hubsaude/simulador-{port}.pid e matando o processo.
 func Stop(port int) (Result, error) {
-	url := fmt.Sprintf("http://localhost:%d/shutdown", port)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(url, "application/json", nil)
+	pid, err := loadPID(port)
 	if err != nil {
 		return Result{}, fmt.Errorf(
-			"Nao foi possivel conectar ao simulador na porta %d. Verifique se ele esta em execucao.", port,
+			"Nao foi possivel localizar o PID do simulador na porta %d. Verifique se ele esta em execucao com: simulador-cli status --porta %d",
+			port, port,
 		)
 	}
-	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	return Result{Stdout: string(body)}, nil
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		removePID(port)
+		return Result{}, fmt.Errorf("Processo com PID %d nao encontrado. O simulador pode ja ter sido encerrado.", pid)
+	}
+
+	if err := process.Kill(); err != nil {
+		removePID(port)
+		return Result{}, fmt.Errorf("Nao foi possivel encerrar o simulador (PID %d): %v", pid, err)
+	}
+
+	removePID(port)
+
+	response := fmt.Sprintf(
+		`{"status": "SUCCESS", "operation": "server-stop", "port": %d, "message": "Simulador encerrado.", "pid": %d}`,
+		port, pid,
+	)
+	return Result{Stdout: response}, nil
 }
 
-// Status consulta GET /api/info no simulador em execucao.
+// Status consulta GET /api/info no simulador via HTTPS.
 // Três estados possíveis:
-//   - OFFLINE   : nenhum processo responde na porta
-//   - RUNNING   : processo responde, mas /api/info retornou status não-2xx
-//   - (corpo)   : /api/info retornou 2xx — repassa o JSON do simulador
+//   - OFFLINE : nenhum processo responde na porta
+//   - RUNNING : processo responde, mas /api/info retornou status não-2xx
+//   - (corpo) : /api/info retornou 2xx — repassa o JSON do simulador
 func Status(port int) (Result, error) {
-	url := fmt.Sprintf("http://localhost:%d/api/info", port)
+	url := fmt.Sprintf("https://localhost:%d/api/info", port)
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := httpsClient(5 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		offline := fmt.Sprintf(
-			`{"status":"OFFLINE","port":%d,"message":"Simulador nao responde na porta %d."}`,
+			`{"status": "OFFLINE", "port": %d, "message": "Simulador nao responde na porta %d."}`,
 			port, port,
 		)
 		return Result{Stdout: offline}, nil
@@ -74,7 +90,7 @@ func Status(port int) (Result, error) {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		running := fmt.Sprintf(
-			`{"status":"RUNNING","port":%d,"message":"Servidor ativo na porta %d, mas GET /api/info retornou %d. Aguardando simulador.jar real."}`,
+			`{"status": "RUNNING", "port": %d, "message": "Servidor ativo na porta %d, mas GET /api/info retornou %d."}`,
 			port, port, resp.StatusCode,
 		)
 		return Result{Stdout: running}, nil
@@ -84,18 +100,14 @@ func Status(port int) (Result, error) {
 	return Result{Stdout: string(body)}, nil
 }
 
-// StartServer inicia o simulador.jar em segundo plano e aguarda o primeiro
-// objeto JSON impresso no stdout como confirmacao de inicializacao.
-func (c Config) StartServer(args []string) (Result, error) {
+// StartServer inicia o simulador.jar em segundo plano e aguarda confirmacao via health check HTTPS
+// em /actuator/health. Salva o PID em ~/.hubsaude/simulador-{port}.pid ao confirmar inicializacao.
+func (c Config) StartServer(port int, args []string) (Result, error) {
 	if err := c.validate(); err != nil {
 		return Result{}, err
 	}
 
 	command := exec.Command(c.JavaBin, c.jarArgs(args)...)
-	stdoutPipe, err := command.StdoutPipe()
-	if err != nil {
-		return Result{}, fmt.Errorf("Nao foi possivel preparar a captura do stdout do simulador: %w", err)
-	}
 	stderrPipe, err := command.StderrPipe()
 	if err != nil {
 		return Result{}, fmt.Errorf("Nao foi possivel preparar a captura do stderr do simulador: %w", err)
@@ -105,19 +117,13 @@ func (c Config) StartServer(args []string) (Result, error) {
 		return Result{}, fmt.Errorf("Falha ao iniciar o Java. Verifique o valor de --java-bin e tente novamente: %w", err)
 	}
 
-	type stdoutResult struct {
-		output string
-		err    error
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
-	stdoutCh := make(chan stdoutResult, 1)
 	stderrCh := make(chan string, 1)
 	waitCh := make(chan error, 1)
+	healthCh := make(chan error, 1)
 
-	go func() {
-		out, readErr := readFirstJSONObject(stdoutPipe)
-		stdoutCh <- stdoutResult{out, readErr}
-	}()
 	go func() {
 		data, _ := io.ReadAll(stderrPipe)
 		stderrCh <- string(data)
@@ -125,41 +131,108 @@ func (c Config) StartServer(args []string) (Result, error) {
 	go func() {
 		waitCh <- command.Wait()
 	}()
+	go func() {
+		healthCh <- pollHealth(ctx, c.healthURL(port))
+	}()
 
 	select {
-	case sr := <-stdoutCh:
-		if sr.err == nil && strings.TrimSpace(sr.output) != "" {
+	case err := <-healthCh:
+		if err != nil {
+			waitErr := <-waitCh
+			stderr := <-stderrCh
 			return Result{
-				Stdout: sr.output,
-				PID:    command.Process.Pid,
-			}, nil
+				Stderr:   stderr,
+				ExitCode: exitCodeFrom(waitErr),
+			}, fmt.Errorf("Simulador nao ficou disponivel: %v", err)
 		}
+		pid := command.Process.Pid
+		if saveErr := savePID(port, pid); saveErr != nil {
+			fmt.Fprintf(os.Stderr, "Aviso: nao foi possivel salvar PID: %v\n", saveErr)
+		}
+		response := fmt.Sprintf(
+			`{"status": "SUCCESS", "operation": "server-start", "port": %d, "message": "Simulador iniciado.", "pid": %d}`,
+			port, pid,
+		)
+		return Result{Stdout: response, PID: pid}, nil
 
-		waitErr := <-waitCh
+	case waitErr := <-waitCh:
+		cancel()
 		stderr := <-stderrCh
 		result := Result{
-			Stdout:   sr.output,
 			Stderr:   stderr,
 			ExitCode: exitCodeFrom(waitErr),
 		}
 		if result.ExitCode == 0 {
-			return Result{}, fmt.Errorf("O processo Java encerrou sem retornar o JSON de inicializacao do simulador.")
-		}
-		return result, nil
-
-	case waitErr := <-waitCh:
-		stderr := <-stderrCh
-		sr := <-stdoutCh
-		result := Result{
-			Stdout:   sr.output,
-			Stderr:   stderr,
-			ExitCode: exitCodeFrom(waitErr),
-		}
-		if result.ExitCode == 0 && strings.TrimSpace(result.Stdout) == "" && strings.TrimSpace(result.Stderr) == "" {
-			return Result{}, fmt.Errorf("O processo Java encerrou sem retornar nenhuma saida.")
+			return Result{}, fmt.Errorf("O processo Java encerrou inesperadamente sem iniciar o simulador.")
 		}
 		return result, nil
 	}
+}
+
+func (c Config) healthURL(port int) string {
+	if c.HealthCheckURL != "" {
+		return c.HealthCheckURL
+	}
+	return fmt.Sprintf("https://localhost:%d/actuator/health", port)
+}
+
+func pollHealth(ctx context.Context, url string) error {
+	client := httpsClient(3 * time.Second)
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return fmt.Errorf("erro ao preparar requisicao de health check: %v", err)
+		}
+		resp, err := client.Do(req)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout aguardando simulador ficar disponivel")
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+func httpsClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		},
+	}
+}
+
+func pidFilePath(port int) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Sprintf("simulador-%d.pid", port)
+	}
+	return filepath.Join(home, ".hubsaude", fmt.Sprintf("simulador-%d.pid", port))
+}
+
+func savePID(port, pid int) error {
+	path := pidFilePath(port)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(strconv.Itoa(pid)), 0o644)
+}
+
+func loadPID(port int) (int, error) {
+	data, err := os.ReadFile(pidFilePath(port))
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(string(data)))
+}
+
+func removePID(port int) {
+	os.Remove(pidFilePath(port))
 }
 
 func (c Config) validate() error {
@@ -204,65 +277,4 @@ func exitCodeFrom(err error) int {
 		return exitErr.ExitCode()
 	}
 	return 1
-}
-
-func readFirstJSONObject(reader io.Reader) (string, error) {
-	buffered := bufio.NewReader(reader)
-	var output bytes.Buffer
-	started := false
-	depth := 0
-	inString := false
-	escaped := false
-
-	for {
-		b, err := buffered.ReadByte()
-		if err != nil {
-			if !started {
-				return "", err
-			}
-			return output.String(), err
-		}
-
-		if !started {
-			if b == ' ' || b == '\n' || b == '\r' || b == '\t' {
-				continue
-			}
-			if b != '{' {
-				continue
-			}
-			started = true
-			depth = 1
-			output.WriteByte(b)
-			continue
-		}
-
-		output.WriteByte(b)
-
-		if inString {
-			if escaped {
-				escaped = false
-				continue
-			}
-			if b == '\\' {
-				escaped = true
-				continue
-			}
-			if b == '"' {
-				inString = false
-			}
-			continue
-		}
-
-		switch b {
-		case '"':
-			inString = true
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return output.String(), nil
-			}
-		}
-	}
 }

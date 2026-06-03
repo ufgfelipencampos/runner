@@ -66,7 +66,7 @@ func (o *iniciarOptions) run(command *cobra.Command, _ []string) error {
 
 	args := []string{"server", "start", "--port", strconv.Itoa(o.Porta)}
 
-	result, err := newRunnerConfig(o.runtimeFlags).StartServer(args)
+	result, err := newRunnerConfig(o.runtimeFlags).StartServer(o.Porta, args)
 	if err != nil {
 		return wrapRuntimeError(err)
 	}

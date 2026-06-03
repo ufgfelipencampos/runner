@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -45,8 +47,20 @@ func TestStartServerReturnsStartupJSON(t *testing.T) {
 
 	t.Setenv("FAKE_JAVA_BEHAVIOR", "start_success")
 
-	result, err := Config{JavaBin: javaPath, JarPath: jarPath}.
-		StartServer([]string{"server", "start", "--port", "8443"})
+	// Servidor TLS mock que representa o health endpoint do simulador
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+	t.Cleanup(func() { removePID(port) })
+
+	result, err := Config{
+		JavaBin:        javaPath,
+		JarPath:        jarPath,
+		HealthCheckURL: srv.URL + "/actuator/health",
+	}.StartServer(port, []string{"server", "start", "--port", strconv.Itoa(port)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -71,8 +85,12 @@ func TestStartServerReturnsErrorWhenJarFails(t *testing.T) {
 
 	t.Setenv("FAKE_JAVA_BEHAVIOR", "start_error")
 
-	result, err := Config{JavaBin: javaPath, JarPath: jarPath}.
-		StartServer([]string{"server", "start", "--port", "8443"})
+	// Processo encerra com erro antes do health check ter chance de responder
+	result, err := Config{
+		JavaBin:        javaPath,
+		JarPath:        jarPath,
+		HealthCheckURL: "https://localhost:59999/actuator/health",
+	}.StartServer(8443, []string{"server", "start", "--port", "8443"})
 	if err != nil {
 		t.Fatalf("unexpected hard error: %v", err)
 	}
@@ -93,7 +111,7 @@ func TestValidateReturnsHelpfulErrorWhenJavaIsMissing(t *testing.T) {
 	_, err := Config{
 		JavaBin: filepath.Join(tempDir, "missing-java"),
 		JarPath: jarPath,
-	}.StartServer([]string{"server", "start", "--port", "8443"})
+	}.StartServer(8443, []string{"server", "start", "--port", "8443"})
 	if err == nil {
 		t.Fatalf("expected error when java is missing")
 	}
@@ -109,7 +127,7 @@ func TestValidateReturnsHelpfulErrorWhenJarIsMissing(t *testing.T) {
 	_, err := Config{
 		JavaBin: javaPath,
 		JarPath: filepath.Join(tempDir, "missing.jar"),
-	}.StartServer([]string{"server", "start", "--port", "8443"})
+	}.StartServer(8443, []string{"server", "start", "--port", "8443"})
 	if err == nil {
 		t.Fatalf("expected error when jar is missing")
 	}
@@ -120,36 +138,49 @@ func TestValidateReturnsHelpfulErrorWhenJarIsMissing(t *testing.T) {
 
 // --- Stop ---
 
-func TestStopSendsPostToShutdown(t *testing.T) {
-	called := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == "/shutdown" {
-			called = true
-			fmt.Fprint(w, `{"status":"SUCCESS","message":"Simulador encerrado."}`)
-		}
-	}))
-	defer srv.Close()
+func TestStopKillsProcessByPID(t *testing.T) {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", "ping", "-n", "100", "127.0.0.1")
+	} else {
+		cmd = exec.Command("sleep", "100")
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start background process: %v", err)
+	}
 
-	port := srv.Listener.Addr().(*net.TCPAddr).Port
+	port := 59985
+	if err := savePID(port, cmd.Process.Pid); err != nil {
+		t.Fatalf("failed to save PID: %v", err)
+	}
+	t.Cleanup(func() { removePID(port) })
 
 	result, err := Stop(port)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !called {
-		t.Fatalf("expected POST /shutdown to be called")
-	}
 	if !strings.Contains(result.Stdout, "SUCCESS") {
-		t.Fatalf("unexpected result: %s", result.Stdout)
+		t.Fatalf("expected SUCCESS in result, got: %s", result.Stdout)
+	}
+
+	if err := cmd.Wait(); err == nil {
+		t.Fatalf("expected process to be killed, but it exited cleanly")
+	}
+
+	if _, statErr := os.Stat(pidFilePath(port)); !os.IsNotExist(statErr) {
+		t.Fatalf("expected PID file to be removed after stop")
 	}
 }
 
 func TestStopReturnsErrorWhenSimuladorNotRunning(t *testing.T) {
-	_, err := Stop(59990)
+	port := 59990
+	removePID(port) // garante estado limpo
+
+	_, err := Stop(port)
 	if err == nil {
 		t.Fatalf("expected error when simulador is not running")
 	}
-	if !strings.Contains(err.Error(), "porta 59990") {
+	if !strings.Contains(err.Error(), strconv.Itoa(port)) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -157,7 +188,7 @@ func TestStopReturnsErrorWhenSimuladorNotRunning(t *testing.T) {
 // --- Status ---
 
 func TestStatusReturnsOnlineWhenRunning(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/info" {
 			fmt.Fprint(w, `{"status":"ONLINE","version":"1.0.0"}`)
 		}
@@ -176,7 +207,7 @@ func TestStatusReturnsOnlineWhenRunning(t *testing.T) {
 }
 
 func TestStatusReturnsRunningWhenEndpointNotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		fmt.Fprint(w, "<h1>404 Not Found</h1>")
 	}))
@@ -217,8 +248,8 @@ func TestValidateReturnsErrorWhenJarIsDirectory(t *testing.T) {
 
 	_, err := Config{
 		JavaBin: javaPath,
-		JarPath: tempDir, // diretório, não arquivo
-	}.StartServer([]string{"server", "start", "--port", "8443"})
+		JarPath: tempDir,
+	}.StartServer(8443, []string{"server", "start", "--port", "8443"})
 	if err == nil {
 		t.Fatalf("expected error when jar path is a directory")
 	}
@@ -247,51 +278,6 @@ func TestJarArgsContainsJarFlagAndPath(t *testing.T) {
 	}
 }
 
-// --- readFirstJSONObject ---
-
-func TestReadFirstJSONObjectParsesSimpleObject(t *testing.T) {
-	input := `{"status":"SUCCESS","operation":"server-start"}`
-	result, err := readFirstJSONObject(strings.NewReader(input))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result != input {
-		t.Fatalf("expected %q, got %q", input, result)
-	}
-}
-
-func TestReadFirstJSONObjectSkipsLeadingWhitespace(t *testing.T) {
-	input := "   \n\t{\"status\":\"SUCCESS\"}"
-	result, err := readFirstJSONObject(strings.NewReader(input))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(result, `"status"`) {
-		t.Fatalf("expected parsed JSON, got: %q", result)
-	}
-}
-
-func TestReadFirstJSONObjectHandlesNestedObjects(t *testing.T) {
-	input := `{"outer":{"inner":"value"},"x":1}`
-	result, err := readFirstJSONObject(strings.NewReader(input))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(result, "inner") {
-		t.Fatalf("expected nested key in result, got: %q", result)
-	}
-	if result != input {
-		t.Fatalf("expected complete object, got: %q", result)
-	}
-}
-
-func TestReadFirstJSONObjectReturnsErrorOnEmptyInput(t *testing.T) {
-	_, err := readFirstJSONObject(strings.NewReader(""))
-	if err == nil {
-		t.Fatalf("expected error on empty input")
-	}
-}
-
 // --- helpers ---
 
 func createFakeJava(t *testing.T) (string, string) {
@@ -305,11 +291,6 @@ func createFakeJava(t *testing.T) (string, string) {
 		script := "@echo off\r\n" +
 			"if not \"%FAKE_JAVA_LOG%\"==\"\" echo %*>>\"%FAKE_JAVA_LOG%\"\r\n" +
 			"if \"%FAKE_JAVA_BEHAVIOR%\"==\"start_success\" (\r\n" +
-			"  echo {\r\n" +
-			"  echo   \"status\": \"SUCCESS\",\r\n" +
-			"  echo   \"operation\": \"server-start\",\r\n" +
-			"  echo   \"port\": 8443\r\n" +
-			"  echo }\r\n" +
 			"  powershell -NoProfile -Command \"Start-Sleep -Seconds 3\" >NUL\r\n" +
 			"  exit /b 0\r\n" +
 			")\r\n" +
@@ -317,7 +298,7 @@ func createFakeJava(t *testing.T) (string, string) {
 			"  >&2 echo {\"status\":\"ERROR\",\"type\":\"RUNTIME_ERROR\"}\r\n" +
 			"  exit /b 1\r\n" +
 			")\r\n" +
-			"echo {\"status\":\"SUCCESS\"}\r\n"
+			"powershell -NoProfile -Command \"Start-Sleep -Seconds 3\" >NUL\r\n"
 		if err := os.WriteFile(javaPath, []byte(script), 0o755); err != nil {
 			t.Fatalf("failed to write fake java script: %v", err)
 		}
@@ -329,13 +310,6 @@ func createFakeJava(t *testing.T) (string, string) {
 		"if [ -n \"$FAKE_JAVA_LOG\" ]; then printf '%s\\n' \"$*\" >> \"$FAKE_JAVA_LOG\"; fi\n" +
 		"case \"$FAKE_JAVA_BEHAVIOR\" in\n" +
 		"  start_success)\n" +
-		"    cat <<'EOF'\n" +
-		"{\n" +
-		"  \"status\": \"SUCCESS\",\n" +
-		"  \"operation\": \"server-start\",\n" +
-		"  \"port\": 8443\n" +
-		"}\n" +
-		"EOF\n" +
 		"    sleep 3\n" +
 		"    exit 0\n" +
 		"    ;;\n" +
@@ -344,7 +318,7 @@ func createFakeJava(t *testing.T) (string, string) {
 		"    exit 1\n" +
 		"    ;;\n" +
 		"esac\n" +
-		"printf '{\"status\":\"SUCCESS\"}\\n'\n"
+		"sleep 3\n"
 	if err := os.WriteFile(javaPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write fake java script: %v", err)
 	}
