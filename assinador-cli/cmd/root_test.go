@@ -99,6 +99,50 @@ func TestAssinarMapsPortugueseFlagsToJarArguments(t *testing.T) {
 	}
 }
 
+func TestAssinarUsesManagedJavaWhenJavaBinIsNotProvided(t *testing.T) {
+	tempDir := t.TempDir()
+	inputPath := filepath.Join(tempDir, "entrada.json")
+	outputPath := filepath.Join(tempDir, "saida.json")
+	jarPath := filepath.Join(tempDir, "assinador-verificador.jar")
+	if err := os.WriteFile(inputPath, []byte(`{"resourceType":"Bundle"}`), 0o644); err != nil {
+		t.Fatalf("failed to write input: %v", err)
+	}
+	if err := os.WriteFile(jarPath, []byte("fake-jar"), 0o644); err != nil {
+		t.Fatalf("failed to write jar: %v", err)
+	}
+
+	logPath := provisionManagedJavaForCommandTests(t)
+	t.Setenv("FAKE_JAVA_BEHAVIOR", "run_success")
+	t.Setenv("FAKE_JAVA_LOG", logPath)
+
+	stdout, stderr, err := executeRootCommand(
+		"assinar",
+		"--entrada", inputPath,
+		"--saida", outputPath,
+		"--modo", "direto",
+		"--alias", "demo-signer",
+		"--jar", jarPath,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got: %s", stderr)
+	}
+	if !strings.Contains(stdout, "\"status\":\"SUCCESS\"") {
+		t.Fatalf("unexpected stdout: %s", stdout)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read managed java log: %v", err)
+	}
+	logContent := string(logBytes)
+	if !strings.Contains(logContent, "--mode direct") || !strings.Contains(logContent, "--alias demo-signer") {
+		t.Fatalf("unexpected managed java log content: %s", logContent)
+	}
+}
+
 func TestVerificarRejectsUnsupportedAliasFlag(t *testing.T) {
 	tempDir := t.TempDir()
 	inputPath := filepath.Join(tempDir, "entrada.json")
@@ -415,4 +459,47 @@ func createFakeJavaForCommandTests(t *testing.T) (string, string) {
 		t.Fatalf("failed to write fake java script: %v", err)
 	}
 	return javaPath, logPath
+}
+
+func provisionManagedJavaForCommandTests(t *testing.T) string {
+	t.Helper()
+
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "managed-java.log")
+	runnerHome := filepath.Join(tempDir, "runner")
+
+	switch runtime.GOOS {
+	case "windows":
+		t.Setenv("APPDATA", tempDir)
+		javaDir := filepath.Join(runnerHome, "java", "temurin-jre-17", "windows-x64", "bin")
+		if err := os.MkdirAll(javaDir, 0o755); err != nil {
+			t.Fatalf("failed to create managed runtime dir: %v", err)
+		}
+		script := "@echo off\r\n" +
+			"if \"%1\"==\"-version\" exit /b 0\r\n" +
+			"if not \"%FAKE_JAVA_LOG%\"==\"\" echo %*>>\"%FAKE_JAVA_LOG%\"\r\n" +
+			"if \"%FAKE_JAVA_BEHAVIOR%\"==\"run_success\" (\r\n" +
+			"  echo {\"status\":\"SUCCESS\",\"operation\":\"sign\"}\r\n" +
+			"  exit /b 0\r\n" +
+			")\r\n" +
+			"echo {\"status\":\"SUCCESS\"}\r\n"
+		if err := os.WriteFile(filepath.Join(javaDir, "java.cmd"), []byte(script), 0o755); err != nil {
+			t.Fatalf("failed to write managed java script: %v", err)
+		}
+	default:
+		t.Setenv("XDG_CONFIG_HOME", tempDir)
+		javaDir := filepath.Join(runnerHome, "java", "temurin-jre-17", runtime.GOOS+"-x64", "bin")
+		if err := os.MkdirAll(javaDir, 0o755); err != nil {
+			t.Fatalf("failed to create managed runtime dir: %v", err)
+		}
+		script := "#!/bin/sh\n" +
+			"if [ \"$1\" = \"-version\" ]; then exit 0; fi\n" +
+			"if [ -n \"$FAKE_JAVA_LOG\" ]; then printf '%s\\n' \"$*\" >> \"$FAKE_JAVA_LOG\"; fi\n" +
+			"printf '{\"status\":\"SUCCESS\",\"operation\":\"sign\"}\\n'\n"
+		if err := os.WriteFile(filepath.Join(javaDir, "java"), []byte(script), 0o755); err != nil {
+			t.Fatalf("failed to write managed java script: %v", err)
+		}
+	}
+
+	return logPath
 }

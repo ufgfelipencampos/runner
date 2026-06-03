@@ -71,7 +71,10 @@ func (o *verificarOptions) run(command *cobra.Command, _ []string) error {
 	}
 
 	// Usa RunWithStrategy
-	config := newRunnerConfig(o.runtimeFlags)
+	config, err := newRunnerConfig(o.runtimeFlags)
+	if err != nil {
+		return wrapRuntimeError(err)
+	}
 	result, err := config.RunWithStrategy(args, strategy.String(), o.Porta)
 	if err != nil {
 		return wrapRuntimeError(err)

@@ -99,7 +99,12 @@ func (o *servidorActionOptions) runIniciar(command *cobra.Command, _ []string) e
 		args = append(args, "--timeout", strconv.Itoa(timeout))
 	}
 
-	result, err := newRunnerConfig(o.runtimeFlags).StartServer(args)
+	config, err := newRunnerConfig(o.runtimeFlags)
+	if err != nil {
+		return wrapRuntimeError(err)
+	}
+
+	result, err := config.StartServer(args)
 	if err != nil {
 		return wrapRuntimeError(err)
 	}
@@ -112,7 +117,12 @@ func (o *servidorActionOptions) runStatus(command *cobra.Command, _ []string) er
 		return validationError("A porta informada em --porta deve estar entre 1 e 65535.")
 	}
 
-	result, err := newRunnerConfig(o.runtimeFlags).Run([]string{"server", "status", "--port", strconv.Itoa(o.Porta)})
+	config, err := newRunnerConfig(o.runtimeFlags)
+	if err != nil {
+		return wrapRuntimeError(err)
+	}
+
+	result, err := config.Run([]string{"server", "status", "--port", strconv.Itoa(o.Porta)})
 	if err != nil {
 		return wrapRuntimeError(err)
 	}
@@ -125,7 +135,12 @@ func (o *servidorActionOptions) runParar(command *cobra.Command, _ []string) err
 		return validationError("A porta informada em --porta deve estar entre 1 e 65535.")
 	}
 
-	result, err := newRunnerConfig(o.runtimeFlags).Run([]string{"server", "stop", "--port", strconv.Itoa(o.Porta)})
+	config, err := newRunnerConfig(o.runtimeFlags)
+	if err != nil {
+		return wrapRuntimeError(err)
+	}
+
+	result, err := config.Run([]string{"server", "stop", "--port", strconv.Itoa(o.Porta)})
 	if err != nil {
 		return wrapRuntimeError(err)
 	}
