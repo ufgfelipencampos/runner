@@ -9,6 +9,7 @@ Projeto em construcao para orquestrar CLIs multiplataforma e JARs Java do Sistem
   - `assinador-verificador/`: modulo Java ja iniciado
   - `assinador-cli/`: primeiro CLI Go para orquestrar o JAR atual
 - O foco atual do JAR cobre `sign`, `validate` e o ciclo de vida do `server` simulado.
+- O `assinador-cli` provisiona automaticamente um runtime local do Temurin JRE 17 quando `--java-bin` nao e informado.
 
 ## Estrutura
 
@@ -32,10 +33,10 @@ powershell -ExecutionPolicy Bypass -File .\assinador-verificador\test.ps1
 
 ## Como exercitar o CLI Go
 
-O primeiro incremento do `assinador-cli` assume:
+O `assinador-cli` assume:
 
-- Java disponivel localmente via `java` ou `--java-bin`
 - `assinador-verificador.jar` disponivel localmente via `--jar`
+- Java provisionado automaticamente em um diretorio local do usuario, ou sobrescrito por `--java-bin`
 
 Exemplos:
 
@@ -54,6 +55,16 @@ assinador-cli verificar `
 
 assinador-cli servidor iniciar --porta 8080
 assinador-cli servidor status --porta 8080
-assinador-cli servidor parar --porta 8080"
+assinador-cli servidor parar --porta 8080
 ```
+
+## Runtime Java gerenciado
+
+- Runtime padrao: Temurin JRE 17 `jdk-17.0.18+8`
+- Diretorio local compartilhado do Runner:
+  - Windows: `%APPDATA%\runner`
+  - Linux: `$XDG_CONFIG_HOME/runner` ou `~/.config/runner`
+  - macOS: `~/Library/Application Support/runner`
+- `--java-bin` continua disponivel como override explicito.
+- Se o runtime local ficar corrompido, remova a pasta `runner\java\temurin-jre-17` correspondente e execute o comando novamente.
 

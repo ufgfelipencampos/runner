@@ -9,13 +9,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/felip/runner/assinador-cli/internal/javaruntime"
 	"github.com/felip/runner/assinador-cli/internal/runner"
 	"github.com/spf13/cobra"
 )
 
 const (
 	defaultJarPath = "./assinador-verificador/build/dist/assinador-verificador.jar"
-	defaultJavaBin = "java"
 	defaultPort    = 8080
 )
 
@@ -69,15 +69,20 @@ func ParseExecutionStrategy(input string) (ExecutionStrategy, error) {
 
 func bindRuntimeFlags(command *cobra.Command, target *runtimeFlags) {
 	flags := command.Flags()
-	flags.StringVar(&target.JavaBin, "java-bin", defaultJavaBin, "Executavel Java a ser usado para invocar o JAR.")
+	flags.StringVar(&target.JavaBin, "java-bin", "", "Executavel Java opcional para sobrescrever o runtime gerenciado automaticamente.")
 	flags.StringVar(&target.JarPath, "jar", defaultJarPath, "Caminho para o arquivo assinador-verificador.jar.")
 }
 
-func newRunnerConfig(runtime runtimeFlags) runner.Config {
-	return runner.Config{
-		JavaBin: runtime.JavaBin,
-		JarPath: runtime.JarPath,
+func newRunnerConfig(runtime runtimeFlags) (runner.Config, error) {
+	javaBin, err := javaruntime.NewDefaultResolver().Resolve(runtime.JavaBin)
+	if err != nil {
+		return runner.Config{}, err
 	}
+
+	return runner.Config{
+		JavaBin: javaBin,
+		JarPath: runtime.JarPath,
+	}, nil
 }
 
 func validationError(message string, args ...any) error {
