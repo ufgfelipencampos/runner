@@ -138,6 +138,9 @@ func (c Config) StartServer(port int, args []string) (Result, error) {
 	select {
 	case err := <-healthCh:
 		if err != nil {
+			if command.Process != nil {
+				_ = command.Process.Kill()
+			}
 			waitErr := <-waitCh
 			stderr := <-stderrCh
 			return Result{

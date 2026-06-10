@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- IsPortInUse ---
@@ -96,6 +97,35 @@ func TestStartServerReturnsErrorWhenJarFails(t *testing.T) {
 	}
 	if result.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit code on jar failure")
+	}
+}
+
+func TestStartServerKillsProcessWhenHealthCheckFails(t *testing.T) {
+	tempDir := t.TempDir()
+	javaPath, _ := createFakeJava(t)
+	jarPath := filepath.Join(tempDir, "simulador.jar")
+	if err := os.WriteFile(jarPath, []byte("fake-jar"), 0o644); err != nil {
+		t.Fatalf("failed to create fake jar: %v", err)
+	}
+
+	t.Setenv("FAKE_JAVA_BEHAVIOR", "start_success")
+
+	start := time.Now()
+	result, err := Config{
+		JavaBin:        javaPath,
+		JarPath:        jarPath,
+		HealthCheckURL: "://invalid-health-url",
+	}.StartServer(8443, []string{"server", "start", "--port", "8443"})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("expected health check error")
+	}
+	if result.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit code after killing unhealthy process")
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("expected unhealthy process to be killed quickly, took %s", elapsed)
 	}
 }
 

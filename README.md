@@ -8,13 +8,16 @@ Projeto em construcao para orquestrar CLIs multiplataforma e JARs Java do Sistem
 - Neste incremento, o repositorio contem:
   - `assinador-verificador/`: modulo Java ja iniciado
   - `assinador-cli/`: primeiro CLI Go para orquestrar o JAR atual
+  - `simulador-cli/`: CLI Go para provisionar e gerenciar o ciclo de vida do `simulador.jar`
 - O foco atual do JAR cobre `sign`, `validate` e o ciclo de vida do `server` simulado.
 - O `assinador-cli` provisiona automaticamente um runtime local do Temurin JRE 17 quando `--java-bin` nao e informado.
+- O `simulador-cli` provisiona automaticamente `simulador.jar` e um Temurin JRE 21 quando necessario.
 
 ## Estrutura
 
 - `assinador-verificador/`: modulo Java inicial do assinador.
 - `assinador-cli/`: CLI em Go com comandos em portugues para o assinador.
+- `simulador-cli/`: CLI em Go com comandos `iniciar`, `status` e `parar` para o simulador.
 
 ## Contrato atual de modos
 
@@ -56,6 +59,19 @@ assinador-cli verificar `
 assinador-cli servidor iniciar --porta 8080
 assinador-cli servidor status --porta 8080
 assinador-cli servidor parar --porta 8080
+```
+
+## Como exercitar o CLI do simulador
+
+O `simulador-cli` baixa o `simulador.jar` quando necessario, usando o `release.json`
+configurado no codigo ou sobrescrito por `SIMULADOR_RELEASE_URL`.
+
+Exemplos:
+
+```powershell
+simulador-cli iniciar --porta 8443
+simulador-cli status --porta 8443
+simulador-cli parar --porta 8443
 ```
 
 ## Runtime Java gerenciado
