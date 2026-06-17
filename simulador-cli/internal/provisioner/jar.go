@@ -11,7 +11,7 @@ import (
 )
 
 // DefaultReleaseURL é sobrescrito via SIMULADOR_RELEASE_URL para testes e ambientes customizados.
-const DefaultReleaseURL = "https://raw.githubusercontent.com/gthUFG/runner/main/release.json"
+const DefaultReleaseURL = "https://raw.githubusercontent.com/ufgfelipencampos/runner/main/release.json"
 
 type ReleaseInfo struct {
 	Version string `json:"version"`
