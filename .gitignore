@@ -1,4 +1,5 @@
 /assinador-verificador/build/
+/dist/
 CLAUDE.md
 assinador-verificador/.idea/
 assinador-verificador/src/main/main.iml
@@ -7,4 +8,4 @@ assinado.json
 entrada.json
 saida.json
 assinador-cli/assinador-cli.exe
-assinador-cli/go.sum
+simulador-cli/simulador-cli.exe

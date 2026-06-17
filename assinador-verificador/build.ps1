@@ -22,14 +22,15 @@ $buildDir = Join-Path $resolvedProjectRoot "build"
 
 if (Test-Path $buildDir) {
     $resolvedBuildDir = (Resolve-Path $buildDir).Path
-    if (-not $resolvedBuildDir.StartsWith($resolvedProjectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    $projectRootPrefix = $resolvedProjectRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedBuildDir.StartsWith($projectRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to clean an unexpected directory: $resolvedBuildDir"
     }
 
     Remove-Item -LiteralPath $resolvedBuildDir -Recurse -Force
 }
 
-$classesDir = Join-Path $buildDir "classes\main"
+$classesDir = Join-Path (Join-Path $buildDir "classes") "main"
 $distDir = Join-Path $buildDir "dist"
 $tmpDir = Join-Path $buildDir "tmp"
 $manifestFile = Join-Path $tmpDir "manifest.mf"

@@ -22,8 +22,10 @@ $buildScript = Join-Path $resolvedProjectRoot "build.ps1"
 
 & $buildScript
 
-$mainClassesDir = Join-Path $resolvedProjectRoot "build\classes\main"
-$testClassesDir = Join-Path $resolvedProjectRoot "build\classes\test"
+$mainClassesDir = Join-Path (Join-Path $resolvedProjectRoot "build") "classes"
+$mainClassesDir = Join-Path $mainClassesDir "main"
+$testClassesDir = Join-Path (Join-Path $resolvedProjectRoot "build") "classes"
+$testClassesDir = Join-Path $testClassesDir "test"
 $testSourceRoot = Join-Path $resolvedProjectRoot "src\test\java"
 
 New-Item -ItemType Directory -Force -Path $testClassesDir | Out-Null
